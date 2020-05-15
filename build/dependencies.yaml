@@ -116,6 +116,8 @@ dependencies:
       match: debian_iptables_version=
     - path: build/workspace.bzl
       match: tag =
+    - path: test/utils/image/manifest.go
+      match: configs\[DebianIptables\] = Config{buildImageRegistry, "debian-iptables", "v\d+\.\d+.\d+"}
 
   - name: "k8s.gcr.io/go-runner"
     version: 0.1.1
@@ -130,6 +132,13 @@ dependencies:
       match: go_runner_version=
     - path: build/workspace.bzl
       match: tag =
+
+  - name: "k8s.gcr.io/kube-cross: dependents"
+    version: v1.13.9-5
+    refPaths:
+    - path: build/build-image/cross/VERSION
+    - path: test/images/sample-apiserver/Dockerfile
+      match: us\.gcr\.io\/k8s-artifacts-prod\/build-image\/kube-cross:v\d+\.\d+\.\d+-\d+
 
   - name: "k8s.gcr.io/pause"
     version: 3.3
