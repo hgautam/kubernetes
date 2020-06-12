@@ -965,7 +965,7 @@ EOF
     # If GKE exec auth for webhooks has been requested, then
     # ValidatingAdmissionWebhook should use it.  Otherwise, run with the default
     # config.
-    if [[ "${ADMISSION_CONTROL:-}" == *"ValidatingAdmissionWebhook"* && -n "${WEBHOOK_GKE_EXEC_AUTH:-}" ]]; then
+    if [[ -n "${WEBHOOK_GKE_EXEC_AUTH:-}" ]]; then
       1>&2 echo "ValidatingAdmissionWebhook requested, and WEBHOOK_GKE_EXEC_AUTH specified.  Configuring ValidatingAdmissionWebhook to use gke-exec-auth-plugin."
 
       # Append config for ValidatingAdmissionWebhook to the shared admission
@@ -1680,11 +1680,6 @@ function prepare-etcd-manifest {
   # Replace the volume host path.
   sed -i -e "s@/mnt/master-pd/var/etcd@/mnt/disks/master-pd/var/etcd@g" "${temp_file}"
   mv "${temp_file}" /etc/kubernetes/manifests
-}
-
-function start-etcd-empty-dir-cleanup-pod {
-  local -r src_file="${KUBE_HOME}/kube-manifests/kubernetes/gci-trusty/etcd-empty-dir-cleanup.yaml"
-  cp "${src_file}" "/etc/kubernetes/manifests"
 }
 
 # Starts etcd server pod (and etcd-events pod if needed).
@@ -2921,6 +2916,8 @@ function main() {
   if [[ "${container_runtime}" == "docker" ]]; then
     assemble-docker-flags
   elif [[ "${container_runtime}" == "containerd" ]]; then
+    # stop docker if it is present as we want to use just containerd
+    systemctl stop docker || echo "unable to stop docker"
     setup-containerd
   fi
   start-kubelet
@@ -2929,7 +2926,6 @@ function main() {
     compute-master-manifest-variables
     if [[ -z "${ETCD_SERVERS:-}" ]]; then
       start-etcd-servers
-      start-etcd-empty-dir-cleanup-pod
     fi
     source ${KUBE_BIN}/configure-kubeapiserver.sh
     start-kube-apiserver

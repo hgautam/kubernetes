@@ -545,10 +545,22 @@ func (sched *Scheduler) scheduleOne(ctx context.Context) {
 					" No preemption is performed.")
 			} else {
 				preemptionStartTime := time.Now()
+				// TODO(Huang-Wei): implement the preemption logic as a PostFilter plugin.
 				nominatedNode, _ = sched.preempt(schedulingCycleCtx, prof, state, pod, fitError)
 				metrics.PreemptionAttempts.Inc()
 				metrics.SchedulingAlgorithmPreemptionEvaluationDuration.Observe(metrics.SinceInSeconds(preemptionStartTime))
 				metrics.DeprecatedSchedulingDuration.WithLabelValues(metrics.PreemptionEvaluation).Observe(metrics.SinceInSeconds(preemptionStartTime))
+
+				// Run PostFilter plugins to try to make the pod schedulable in a future scheduling cycle.
+				result, status := prof.RunPostFilterPlugins(ctx, state, pod, fitError.FilteredNodesStatuses)
+				if status.Code() == framework.Error {
+					klog.Errorf("Status after running PostFilter plugins for pod %v/%v: %v", pod.Namespace, pod.Name, status)
+				} else {
+					klog.V(5).Infof("Status after running PostFilter plugins for pod %v/%v: %v", pod.Namespace, pod.Name, status)
+				}
+				if status.IsSuccess() && result != nil {
+					nominatedNode = result.NominatedNodeName
+				}
 			}
 			// Pod did not fit anywhere, so it is counted as a failure. If preemption
 			// succeeds, the pod should get counted as a success the next time we try to
@@ -558,7 +570,7 @@ func (sched *Scheduler) scheduleOne(ctx context.Context) {
 			// No nodes available is counted as unschedulable rather than an error.
 			metrics.PodScheduleFailures.Inc()
 		} else {
-			klog.Errorf("error selecting node for pod: %v", err)
+			klog.ErrorS(err, "Error selecting node for pod", "pod", klog.KObj(pod))
 			metrics.PodScheduleErrors.Inc()
 		}
 		sched.recordSchedulingFailure(prof, podInfo, err, v1.PodReasonUnschedulable, nominatedNode)
@@ -663,7 +675,7 @@ func (sched *Scheduler) scheduleOne(ctx context.Context) {
 		} else {
 			// Calculating nodeResourceString can be heavy. Avoid it if klog verbosity is below 2.
 			if klog.V(2).Enabled() {
-				klog.Infof("pod %v/%v is bound successfully on node %q, %d nodes evaluated, %d nodes were found feasible.", assumedPod.Namespace, assumedPod.Name, scheduleResult.SuggestedHost, scheduleResult.EvaluatedNodes, scheduleResult.FeasibleNodes)
+				klog.InfoS("Successfully bound pod to node", "pod", klog.KObj(pod), "node", scheduleResult.SuggestedHost, "evaluatedNodes", scheduleResult.EvaluatedNodes, "feasibleNodes", scheduleResult.FeasibleNodes)
 			}
 
 			metrics.PodScheduleSuccesses.Inc()
