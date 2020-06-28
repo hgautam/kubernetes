@@ -126,7 +126,7 @@ func New(
 	featureGate featuregate.FeatureGate,
 ) (*Controller, error) {
 	broadcaster := record.NewBroadcaster()
-	broadcaster.StartLogging(klog.Infof)
+	broadcaster.StartStructuredLogging(0)
 	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "service-controller"})
 
@@ -635,12 +635,6 @@ func nodeSlicesEqualForLB(x, y []*v1.Node) bool {
 
 func (s *Controller) getNodeConditionPredicate() NodeConditionPredicate {
 	return func(node *v1.Node) bool {
-		// We add the master to the node list, but its unschedulable.  So we use this to filter
-		// the master.
-		if node.Spec.Unschedulable {
-			return false
-		}
-
 		if s.legacyNodeRoleFeatureEnabled {
 			// As of 1.6, we will taint the master, but not necessarily mark it unschedulable.
 			// Recognize nodes labeled as master, and filter them also, as we were doing previously.

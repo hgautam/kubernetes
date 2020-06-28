@@ -513,7 +513,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.7 was missing json tags on the BindVerb field and required "BindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 			}},
 		},
@@ -611,7 +611,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.8 became case-insensitive and tolerated "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 			}},
 		},
@@ -666,6 +666,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -701,11 +702,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -715,7 +714,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.9 was case-insensitive and tolerated "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 			}},
 		},
@@ -773,6 +772,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -808,11 +808,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -822,7 +820,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.10 was case-insensitive and tolerated "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 				ManagedResources: []config.ExtenderManagedResource{{Name: "example.com/foo", IgnoredByScheduler: true}},
 				Ignorable:        true,
@@ -892,6 +890,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -928,11 +927,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -942,7 +939,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.11 restored case-sensitivity, but allowed either "BindVerb" or "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 				ManagedResources: []config.ExtenderManagedResource{{Name: "example.com/foo", IgnoredByScheduler: true}},
 				Ignorable:        true,
@@ -1013,6 +1010,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -1050,11 +1048,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -1064,7 +1060,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.11 restored case-sensitivity, but allowed either "BindVerb" or "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 				ManagedResources: []config.ExtenderManagedResource{{Name: "example.com/foo", IgnoredByScheduler: true}},
 				Ignorable:        true,
@@ -1134,6 +1130,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -1172,11 +1169,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -1186,7 +1181,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.11 restored case-sensitivity, but allowed either "BindVerb" or "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 				ManagedResources: []config.ExtenderManagedResource{{Name: "example.com/foo", IgnoredByScheduler: true}},
 				Ignorable:        true,
@@ -1260,6 +1255,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "NodeResourcesFit"},
 					{Name: "ServiceAffinity"},
+					{Name: "VolumeBinding"},
 					{Name: "InterPodAffinity"},
 				},
 				"FilterPlugin": {
@@ -1298,11 +1294,9 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 					{Name: "DefaultPodTopologySpread", Weight: 2},
 					{Name: "TaintToleration", Weight: 2},
 				},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
 			},
 			wantExtenders: []config.Extender{{
 				URLPrefix:        "/prefix",
@@ -1312,7 +1306,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 				BindVerb:         "bind", // 1.11 restored case-sensitivity, but allowed either "BindVerb" or "bindVerb"
 				EnableHTTPS:      true,
 				TLSConfig:        &config.ExtenderTLSConfig{Insecure: true},
-				HTTPTimeout:      1,
+				HTTPTimeout:      metav1.Duration{Duration: 1},
 				NodeCacheCapable: true,
 				ManagedResources: []config.ExtenderManagedResource{{Name: "example.com/foo", IgnoredByScheduler: true}},
 				Ignorable:        true,
@@ -1389,6 +1383,7 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 			{Name: "NodePorts"},
 			{Name: "PodTopologySpread"},
 			{Name: "InterPodAffinity"},
+			{Name: "VolumeBinding"},
 		},
 		"FilterPlugin": {
 			{Name: "NodeUnschedulable"},
@@ -1407,6 +1402,9 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 			{Name: "PodTopologySpread"},
 			{Name: "InterPodAffinity"},
 		},
+		"PostFilterPlugin": {
+			{Name: "DefaultPreemption"},
+		},
 		"PreScorePlugin": {
 			{Name: "InterPodAffinity"},
 			{Name: "PodTopologySpread"},
@@ -1424,11 +1422,9 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 			{Name: "TaintToleration", Weight: 1},
 			{Name: "DefaultPodTopologySpread", Weight: 1},
 		},
-		"BindPlugin":      {{Name: "DefaultBinder"}},
-		"ReservePlugin":   {{Name: "VolumeBinding"}},
-		"UnreservePlugin": {{Name: "VolumeBinding"}},
-		"PreBindPlugin":   {{Name: "VolumeBinding"}},
-		"PostBindPlugin":  {{Name: "VolumeBinding"}},
+		"BindPlugin":    {{Name: "DefaultBinder"}},
+		"ReservePlugin": {{Name: "VolumeBinding"}},
+		"PreBindPlugin": {{Name: "VolumeBinding"}},
 	}
 
 	testcases := []struct {
@@ -1457,6 +1453,7 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 					{Name: "NodePorts"},
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
+					{Name: "VolumeBinding"},
 				},
 				"FilterPlugin": {
 					{Name: "NodeUnschedulable"},
@@ -1475,6 +1472,9 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
 				},
+				"PostFilterPlugin": {
+					{Name: "DefaultPreemption"},
+				},
 				"PreScorePlugin": {
 					{Name: "InterPodAffinity"},
 					{Name: "PodTopologySpread"},
@@ -1492,11 +1492,9 @@ func TestAlgorithmProviderCompatibility(t *testing.T) {
 					{Name: "TaintToleration", Weight: 1},
 					{Name: "DefaultPodTopologySpread", Weight: 1},
 				},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
 			},
 		},
 	}
@@ -1545,6 +1543,7 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 			{Name: "NodePorts"},
 			{Name: "PodTopologySpread"},
 			{Name: "InterPodAffinity"},
+			{Name: "VolumeBinding"},
 		},
 		"FilterPlugin": {
 			{Name: "NodeUnschedulable"},
@@ -1563,6 +1562,9 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 			{Name: "PodTopologySpread"},
 			{Name: "InterPodAffinity"},
 		},
+		"PostFilterPlugin": {
+			{Name: "DefaultPreemption"},
+		},
 		"PreScorePlugin": {
 			{Name: "InterPodAffinity"},
 			{Name: "PodTopologySpread"},
@@ -1580,11 +1582,9 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 			{Name: "TaintToleration", Weight: 1},
 			{Name: "DefaultPodTopologySpread", Weight: 1},
 		},
-		"ReservePlugin":   {{Name: "VolumeBinding"}},
-		"UnreservePlugin": {{Name: "VolumeBinding"}},
-		"PreBindPlugin":   {{Name: "VolumeBinding"}},
-		"BindPlugin":      {{Name: "DefaultBinder"}},
-		"PostBindPlugin":  {{Name: "VolumeBinding"}},
+		"ReservePlugin": {{Name: "VolumeBinding"}},
+		"PreBindPlugin": {{Name: "VolumeBinding"}},
+		"BindPlugin":    {{Name: "DefaultBinder"}},
 	}
 
 	testcases := []struct {
@@ -1740,6 +1740,7 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 						{Name: "NodePorts"},
 						{Name: "InterPodAffinity"},
 						{Name: "PodTopologySpread"},
+						{Name: "VolumeBinding"},
 					},
 				},
 				Filter: &config.PluginSet{
@@ -1759,6 +1760,11 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 						{Name: "VolumeZone"},
 						{Name: "InterPodAffinity"},
 						{Name: "PodTopologySpread"},
+					},
+				},
+				PostFilter: &config.PluginSet{
+					Disabled: []config.Plugin{
+						{Name: "DefaultPreemption"},
 					},
 				},
 				PreScore: &config.PluginSet{
@@ -1793,11 +1799,6 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 					},
 				},
 				Reserve: &config.PluginSet{
-					Disabled: []config.Plugin{
-						{Name: "VolumeBinding"},
-					},
-				},
-				Unreserve: &config.PluginSet{
 					Disabled: []config.Plugin{
 						{Name: "VolumeBinding"},
 					},
@@ -1907,6 +1908,9 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 					{Name: "NodeResourcesFit"},
 					{Name: "NodeUnschedulable"},
 				},
+				"PostFilterPlugin": {
+					{Name: "DefaultPreemption"},
+				},
 				"PreScorePlugin": {
 					{Name: "TaintToleration"},
 					{Name: "DefaultPodTopologySpread"},
@@ -1922,11 +1926,9 @@ func TestPluginsConfigurationCompatibility(t *testing.T) {
 					{Name: "ImageLocality", Weight: 24},
 					{Name: "NodeResourcesBalancedAllocation", Weight: 24},
 				},
-				"ReservePlugin":   {{Name: "VolumeBinding"}},
-				"UnreservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin":   {{Name: "VolumeBinding"}},
-				"BindPlugin":      {{Name: "DefaultBinder"}},
-				"PostBindPlugin":  {{Name: "VolumeBinding"}},
+				"ReservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin": {{Name: "VolumeBinding"}},
+				"BindPlugin":    {{Name: "DefaultBinder"}},
 			},
 			wantPluginConfig: nil,
 		},
