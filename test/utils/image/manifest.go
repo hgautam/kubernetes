@@ -31,13 +31,12 @@ type RegistryList struct {
 	DockerLibraryRegistry   string `yaml:"dockerLibraryRegistry"`
 	DockerGluster           string `yaml:"dockerGluster"`
 	E2eRegistry             string `yaml:"e2eRegistry"`
+	E2eVolumeRegistry       string `yaml:"e2eVolumeRegistry"`
 	PromoterE2eRegistry     string `yaml:"promoterE2eRegistry"`
 	BuildImageRegistry      string `yaml:"buildImageRegistry"`
 	InvalidRegistry         string `yaml:"invalidRegistry"`
 	GcRegistry              string `yaml:"gcRegistry"`
 	GcrReleaseRegistry      string `yaml:"gcrReleaseRegistry"`
-	// TODO: The last consumer of this has been removed and it should be deprecated
-	GoogleContainerRegistry string `yaml:"googleContainerRegistry"`
 	PrivateRegistry         string `yaml:"privateRegistry"`
 	SampleRegistry          string `yaml:"sampleRegistry"`
 	K8sCSI                  string `yaml:"k8sCSI"`
@@ -71,14 +70,12 @@ func initReg() RegistryList {
 		DockerLibraryRegistry:   "docker.io/library",
 		DockerGluster:           "docker.io/gluster",
 		E2eRegistry:             "gcr.io/kubernetes-e2e-test-images",
-		// TODO: After the domain flip, this should instead be k8s.gcr.io/k8s-artifacts-prod/e2e-test-images
-		PromoterE2eRegistry: "us.gcr.io/k8s-artifacts-prod/e2e-test-images",
-		BuildImageRegistry:  "us.gcr.io/k8s-artifacts-prod/build-image",
-		InvalidRegistry:     "invalid.com/invalid",
-		GcRegistry:          "k8s.gcr.io",
-		GcrReleaseRegistry:  "gcr.io/gke-release",
-		// TODO: The last consumer of this has been removed and it should be deleted
-		GoogleContainerRegistry: "gcr.io/google-containers",
+		E2eVolumeRegistry:       "gcr.io/kubernetes-e2e-test-images/volume",
+		PromoterE2eRegistry:     "k8s.gcr.io/e2e-test-images",
+		BuildImageRegistry:      "k8s.gcr.io/build-image",
+		InvalidRegistry:         "invalid.com/invalid",
+		GcRegistry:              "k8s.gcr.io",
+		GcrReleaseRegistry:      "gcr.io/gke-release",
 		PrivateRegistry:         "gcr.io/k8s-authenticated-test",
 		SampleRegistry:          "gcr.io/google-samples",
 		K8sCSI:                  "gcr.io/k8s-staging-csi",
@@ -105,6 +102,7 @@ var (
 	dockerLibraryRegistry   = registry.DockerLibraryRegistry
 	dockerGluster           = registry.DockerGluster
 	e2eRegistry             = registry.E2eRegistry
+	e2eVolumeRegistry       = registry.E2eVolumeRegistry
 	promoterE2eRegistry     = registry.PromoterE2eRegistry
 	buildImageRegistry      = registry.BuildImageRegistry
 	gcAuthenticatedRegistry = registry.GcAuthenticatedRegistry
@@ -214,7 +212,7 @@ func initImageConfigs() map[int]Config {
 	configs[CudaVectorAdd2] = Config{e2eRegistry, "cuda-vector-add", "2.0"}
 	configs[DebianIptables] = Config{buildImageRegistry, "debian-iptables", "v12.1.0"}
 	configs[EchoServer] = Config{e2eRegistry, "echoserver", "2.2"}
-	configs[Etcd] = Config{gcRegistry, "etcd", "3.4.7"}
+	configs[Etcd] = Config{gcRegistry, "etcd", "3.4.9"}
 	configs[GlusterDynamicProvisioner] = Config{dockerGluster, "glusterdynamic-provisioner", "v1.0"}
 	configs[Httpd] = Config{dockerLibraryRegistry, "httpd", "2.4.38-alpine"}
 	configs[HttpdNew] = Config{dockerLibraryRegistry, "httpd", "2.4.39-alpine"}
@@ -237,10 +235,10 @@ func initImageConfigs() map[int]Config {
 	configs[RegressionIssue74839] = Config{e2eRegistry, "regression-issue-74839-amd64", "1.0"}
 	configs[ResourceConsumer] = Config{e2eRegistry, "resource-consumer", "1.5"}
 	configs[SdDummyExporter] = Config{gcRegistry, "sd-dummy-exporter", "v0.2.0"}
-	configs[VolumeNFSServer] = Config{e2eRegistry, "volume/nfs", "1.0"}
-	configs[VolumeISCSIServer] = Config{e2eRegistry, "volume/iscsi", "2.0"}
-	configs[VolumeGlusterServer] = Config{e2eRegistry, "volume/gluster", "1.0"}
-	configs[VolumeRBDServer] = Config{e2eRegistry, "volume/rbd", "1.0.1"}
+	configs[VolumeNFSServer] = Config{e2eVolumeRegistry, "nfs", "1.0"}
+	configs[VolumeISCSIServer] = Config{e2eVolumeRegistry, "iscsi", "2.0"}
+	configs[VolumeGlusterServer] = Config{e2eVolumeRegistry, "gluster", "1.0"}
+	configs[VolumeRBDServer] = Config{e2eVolumeRegistry, "rbd", "1.0.1"}
 	return configs
 }
 
@@ -278,6 +276,8 @@ func ReplaceRegistryInImageURL(imageURL string) (string, error) {
 	switch registryAndUser {
 	case "gcr.io/kubernetes-e2e-test-images":
 		registryAndUser = e2eRegistry
+	case "gcr.io/kubernetes-e2e-test-images/volume":
+		registryAndUser = e2eVolumeRegistry
 	case "k8s.gcr.io":
 		registryAndUser = gcRegistry
 	case "gcr.io/k8s-authenticated-test":

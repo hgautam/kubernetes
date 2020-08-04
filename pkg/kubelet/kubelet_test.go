@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -292,8 +293,9 @@ func newTestKubeletWithImageList(
 		UID:       types.UID(kubelet.nodeName),
 		Namespace: "",
 	}
+	etcHostsPathFunc := func(podUID types.UID) string { return getEtcHostsPath(kubelet.getPodDir(podUID)) }
 	// setup eviction manager
-	evictionManager, evictionAdmitHandler := eviction.NewManager(kubelet.resourceAnalyzer, eviction.Config{}, killPodNow(kubelet.podWorkers, fakeRecorder), kubelet.podManager.GetMirrorPodByPod, kubelet.imageManager, kubelet.containerGC, fakeRecorder, nodeRef, kubelet.clock)
+	evictionManager, evictionAdmitHandler := eviction.NewManager(kubelet.resourceAnalyzer, eviction.Config{}, killPodNow(kubelet.podWorkers, fakeRecorder), kubelet.podManager.GetMirrorPodByPod, kubelet.imageManager, kubelet.containerGC, fakeRecorder, nodeRef, kubelet.clock, etcHostsPathFunc)
 
 	kubelet.evictionManager = evictionManager
 	kubelet.admitHandlers.AddPodAdmitHandler(evictionAdmitHandler)
@@ -354,7 +356,7 @@ func newTestPods(count int) []*v1.Pod {
 				HostNetwork: true,
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				UID:  types.UID(10000 + i),
+				UID:  types.UID(strconv.Itoa(10000 + i)),
 				Name: fmt.Sprintf("pod%d", i),
 			},
 		}
