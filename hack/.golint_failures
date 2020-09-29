@@ -8,6 +8,7 @@ pkg/apis/abac/v1beta1
 pkg/apis/admission
 pkg/apis/admissionregistration/v1
 pkg/apis/admissionregistration/v1beta1
+pkg/apis/apiserverinternal
 pkg/apis/apps/v1
 pkg/apis/apps/v1beta1
 pkg/apis/apps/v1beta2
@@ -164,7 +165,6 @@ pkg/registry/rbac/rolebinding/policybased
 pkg/registry/rbac/validation
 pkg/registry/registrytest
 pkg/registry/scheduling/rest
-pkg/registry/settings/rest
 pkg/registry/storage/rest
 pkg/registry/storage/storageclass
 pkg/scheduler/apis/config/v1
@@ -185,7 +185,6 @@ pkg/util/removeall
 pkg/util/selinux
 pkg/util/taints
 pkg/volume
-pkg/volume/azure_dd
 pkg/volume/azure_file
 pkg/volume/csi/fake
 pkg/volume/git_repo
@@ -196,15 +195,13 @@ pkg/volume/util/volumepathhandler
 pkg/volume/vsphere_volume
 plugin/pkg/admission/eventratelimit/apis/eventratelimit/v1alpha1
 plugin/pkg/admission/limitranger
-plugin/pkg/admission/resourcequota/apis/resourcequota/v1
-plugin/pkg/admission/resourcequota/apis/resourcequota/v1alpha1
-plugin/pkg/admission/resourcequota/apis/resourcequota/v1beta1
 plugin/pkg/auth/authorizer/node
 plugin/pkg/auth/authorizer/rbac
 staging/src/k8s.io/api/admission/v1
 staging/src/k8s.io/api/admission/v1beta1
 staging/src/k8s.io/api/admissionregistration/v1
 staging/src/k8s.io/api/admissionregistration/v1beta1
+staging/src/k8s.io/api/apiserverinternal/v1alpha1
 staging/src/k8s.io/api/apps/v1
 staging/src/k8s.io/api/apps/v1beta1
 staging/src/k8s.io/api/apps/v1beta2
@@ -233,7 +230,6 @@ staging/src/k8s.io/api/rbac/v1alpha1
 staging/src/k8s.io/api/rbac/v1beta1
 staging/src/k8s.io/api/scheduling/v1alpha1
 staging/src/k8s.io/api/scheduling/v1beta1
-staging/src/k8s.io/api/settings/v1alpha1
 staging/src/k8s.io/api/storage/v1
 staging/src/k8s.io/api/storage/v1alpha1
 staging/src/k8s.io/api/storage/v1beta1
@@ -261,7 +257,6 @@ staging/src/k8s.io/apimachinery/pkg/apis/meta/v1beta1
 staging/src/k8s.io/apimachinery/pkg/apis/testapigroup
 staging/src/k8s.io/apimachinery/pkg/apis/testapigroup/v1
 staging/src/k8s.io/apimachinery/pkg/conversion
-staging/src/k8s.io/apimachinery/pkg/labels
 staging/src/k8s.io/apimachinery/pkg/runtime
 staging/src/k8s.io/apimachinery/pkg/runtime/schema
 staging/src/k8s.io/apimachinery/pkg/runtime/serializer
@@ -294,6 +289,9 @@ staging/src/k8s.io/apimachinery/pkg/watch
 staging/src/k8s.io/apiserver/pkg/admission
 staging/src/k8s.io/apiserver/pkg/admission/configuration
 staging/src/k8s.io/apiserver/pkg/admission/initializer
+staging/src/k8s.io/apiserver/pkg/admission/plugin/resourcequota/apis/resourcequota/v1
+staging/src/k8s.io/apiserver/pkg/admission/plugin/resourcequota/apis/resourcequota/v1alpha1
+staging/src/k8s.io/apiserver/pkg/admission/plugin/resourcequota/apis/resourcequota/v1beta1
 staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook
 staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/config/apis/webhookadmission
 staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/config/apis/webhookadmission/v1
@@ -303,8 +301,6 @@ staging/src/k8s.io/apiserver/pkg/apis/apiserver
 staging/src/k8s.io/apiserver/pkg/apis/apiserver/v1
 staging/src/k8s.io/apiserver/pkg/apis/apiserver/v1alpha1
 staging/src/k8s.io/apiserver/pkg/apis/apiserver/v1beta1
-staging/src/k8s.io/apiserver/pkg/apis/apiserverinternal
-staging/src/k8s.io/apiserver/pkg/apis/apiserverinternal/v1alpha1
 staging/src/k8s.io/apiserver/pkg/apis/audit
 staging/src/k8s.io/apiserver/pkg/apis/audit/v1
 staging/src/k8s.io/apiserver/pkg/apis/audit/v1alpha1
@@ -382,7 +378,6 @@ staging/src/k8s.io/client-go/discovery
 staging/src/k8s.io/client-go/discovery/fake
 staging/src/k8s.io/client-go/dynamic
 staging/src/k8s.io/client-go/dynamic/fake
-staging/src/k8s.io/client-go/examples/workqueue
 staging/src/k8s.io/client-go/kubernetes/typed/certificates/v1beta1
 staging/src/k8s.io/client-go/kubernetes/typed/certificates/v1beta1/fake
 staging/src/k8s.io/client-go/kubernetes/typed/core/v1

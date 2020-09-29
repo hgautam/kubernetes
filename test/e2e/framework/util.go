@@ -503,12 +503,21 @@ func RandomSuffix() string {
 }
 
 // LookForStringInPodExec looks for the given string in the output of a command
-// executed in a specific pod container.
+// executed in the first container of specified pod.
 // TODO(alejandrox1): move to pod/ subpkg once kubectl methods are refactored.
 func LookForStringInPodExec(ns, podName string, command []string, expectedString string, timeout time.Duration) (result string, err error) {
+	return LookForStringInPodExecToContainer(ns, podName, "", command, expectedString, timeout)
+}
+
+// LookForStringInPodExecToContainer looks for the given string in the output of a
+// command executed in specified pod container, or first container if not specified.
+func LookForStringInPodExecToContainer(ns, podName, containerName string, command []string, expectedString string, timeout time.Duration) (result string, err error) {
 	return lookForString(expectedString, timeout, func() string {
-		// use the first container
-		args := []string{"exec", podName, fmt.Sprintf("--namespace=%v", ns), "--"}
+		args := []string{"exec", podName, fmt.Sprintf("--namespace=%v", ns)}
+		if len(containerName) > 0 {
+			args = append(args, fmt.Sprintf("--container=%s", containerName))
+		}
+		args = append(args, "--")
 		args = append(args, command...)
 		return RunKubectlOrDie(ns, args...)
 	})
@@ -1064,13 +1073,13 @@ func NodeHasTaint(c clientset.Interface, nodeName string, taint *v1.Taint) (bool
 // RunHostCmd runs the given cmd in the context of the given pod using `kubectl exec`
 // inside of a shell.
 func RunHostCmd(ns, name, cmd string) (string, error) {
-	return RunKubectl(ns, "exec", fmt.Sprintf("--namespace=%v", ns), name, "--", "/bin/sh", "-x", "-c", cmd)
+	return RunKubectl(ns, "exec", name, "--", "/bin/sh", "-x", "-c", cmd)
 }
 
 // RunHostCmdWithFullOutput runs the given cmd in the context of the given pod using `kubectl exec`
 // inside of a shell. It will also return the command's stderr.
 func RunHostCmdWithFullOutput(ns, name, cmd string) (string, string, error) {
-	return RunKubectlWithFullOutput(ns, "exec", fmt.Sprintf("--namespace=%v", ns), name, "--", "/bin/sh", "-x", "-c", cmd)
+	return RunKubectlWithFullOutput(ns, "exec", name, "--", "/bin/sh", "-x", "-c", cmd)
 }
 
 // RunHostCmdOrDie calls RunHostCmd and dies on error.
@@ -1148,7 +1157,7 @@ func AllNodesReady(c clientset.Interface, timeout time.Duration) error {
 // LookForStringInLog looks for the given string in the log of a specific pod container
 func LookForStringInLog(ns, podName, container, expectedString string, timeout time.Duration) (result string, err error) {
 	return lookForString(expectedString, timeout, func() string {
-		return RunKubectlOrDie(ns, "logs", podName, container, fmt.Sprintf("--namespace=%v", ns))
+		return RunKubectlOrDie(ns, "logs", podName, container)
 	})
 }
 
@@ -1274,7 +1283,7 @@ func GetAllMasterAddresses(c clientset.Interface) []string {
 // CreateEmptyFileOnPod creates empty file at given path on the pod.
 // TODO(alejandrox1): move to subpkg pod once kubectl methods have been refactored.
 func CreateEmptyFileOnPod(namespace string, podName string, filePath string) error {
-	_, err := RunKubectl(namespace, "exec", fmt.Sprintf("--namespace=%s", namespace), podName, "--", "/bin/sh", "-c", fmt.Sprintf("touch %s", filePath))
+	_, err := RunKubectl(namespace, "exec", podName, "--", "/bin/sh", "-c", fmt.Sprintf("touch %s", filePath))
 	return err
 }
 
@@ -1282,10 +1291,10 @@ func CreateEmptyFileOnPod(namespace string, podName string, filePath string) err
 func DumpDebugInfo(c clientset.Interface, ns string) {
 	sl, _ := c.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.Everything().String()})
 	for _, s := range sl.Items {
-		desc, _ := RunKubectl(ns, "describe", "po", s.Name, fmt.Sprintf("--namespace=%v", ns))
+		desc, _ := RunKubectl(ns, "describe", "po", s.Name)
 		Logf("\nOutput of kubectl describe %v:\n%v", s.Name, desc)
 
-		l, _ := RunKubectl(ns, "logs", s.Name, fmt.Sprintf("--namespace=%v", ns), "--tail=100")
+		l, _ := RunKubectl(ns, "logs", s.Name, "--tail=100")
 		Logf("\nLast 100 log lines of %v:\n%v", s.Name, l)
 	}
 }
