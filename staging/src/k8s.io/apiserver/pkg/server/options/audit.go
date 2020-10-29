@@ -120,6 +120,7 @@ type AuditLogOptions struct {
 	MaxBackups int
 	MaxSize    int
 	Format     string
+	Compress   bool
 
 	BatchOptions    AuditBatchOptions
 	TruncateOptions AuditTruncateOptions
@@ -306,7 +307,7 @@ func (o *AuditOptions) ApplyTo(
 			klog.V(2).Info("No audit policy file provided, no events will be recorded for webhook backend")
 		} else {
 			if c.EgressSelector != nil {
-				egressDialer, err := c.EgressSelector.Lookup(egressselector.Master.AsNetworkContext())
+				egressDialer, err := c.EgressSelector.Lookup(egressselector.ControlPlane.AsNetworkContext())
 				if err != nil {
 					return err
 				}
@@ -449,6 +450,7 @@ func (o *AuditLogOptions) AddFlags(fs *pflag.FlagSet) {
 			strings.Join(pluginlog.AllowedFormats, ",")+".")
 	fs.StringVar(&o.GroupVersionString, "audit-log-version", o.GroupVersionString,
 		"API group and version used for serializing audit events written to log.")
+	fs.BoolVar(&o.Compress, "audit-log-compress", o.Compress, "If set, the rotated log files will be compressed using gzip.")
 }
 
 func (o *AuditLogOptions) Validate() []error {
@@ -513,6 +515,7 @@ func (o *AuditLogOptions) getWriter() io.Writer {
 			MaxAge:     o.MaxAge,
 			MaxBackups: o.MaxBackups,
 			MaxSize:    o.MaxSize,
+			Compress:   o.Compress,
 		}
 	}
 	return w
