@@ -445,17 +445,13 @@ type PersistentVolumeClaimSpec struct {
 	// +optional
 	VolumeMode *PersistentVolumeMode
 	// This field can be used to specify either:
-	// * An existing VolumeSnapshot object (snapshot.storage.k8s.io/VolumeSnapshot - Beta)
+	// * An existing VolumeSnapshot object (snapshot.storage.k8s.io/VolumeSnapshot)
 	// * An existing PVC (PersistentVolumeClaim)
-	// * An existing custom resource/object that implements data population (Alpha)
-	// In order to use VolumeSnapshot object types, the appropriate feature gate
-	// must be enabled (VolumeSnapshotDataSource or AnyVolumeDataSource)
+	// * An existing custom resource that implements data population (Alpha)
+	// In order to use custom resource types that implement data population,
+	// the AnyVolumeDataSource feature gate must be enabled.
 	// If the provisioner or an external controller can support the specified data source,
 	// it will create a new volume based on the contents of the specified data source.
-	// If the specified data source is not supported, the volume will
-	// not be created and the failure will be reported as an event.
-	// In the future, we plan to support more data source types and the behavior
-	// of the provisioner may change.
 	// +optional
 	DataSource *TypedLocalObjectReference
 }
@@ -2823,8 +2819,7 @@ type PodSpec struct {
 	// to run this pod.  If no RuntimeClass resource matches the named class, the pod will not be run.
 	// If unset or empty, the "legacy" RuntimeClass will be used, which is an implicit class with an
 	// empty definition that uses the default runtime handler.
-	// More info: https://git.k8s.io/enhancements/keps/sig-node/runtime-class.md
-	// This is a beta feature as of Kubernetes v1.14.
+	// More info: https://git.k8s.io/enhancements/keps/sig-node/585-runtime-class/README.md
 	// +optional
 	RuntimeClassName *string
 	// Overhead represents the resource overhead associated with running a pod for a given RuntimeClass.
@@ -2964,7 +2959,7 @@ type PodSecurityContext struct {
 	// volume types which support fsGroup based ownership(and permissions).
 	// It will have no effect on ephemeral volume types such as: secret, configmaps
 	// and emptydir.
-	// Valid values are "OnRootMismatch" and "Always". If not specified defaults to "Always".
+	// Valid values are "OnRootMismatch" and "Always". If not specified, "Always" is used.
 	// +optional
 	FSGroupChangePolicy *PodFSGroupChangePolicy
 	// Sysctls hold a list of namespaced sysctls used for the pod. Pods with unsupported
@@ -3694,6 +3689,7 @@ type ServiceSpec struct {
 	// The special value "*" may be used to mean "any topology". This catch-all
 	// value, if used, only makes sense as the last value in the list.
 	// If this is not specified or empty, no topology constraints will be applied.
+	// This field is alpha-level and is only honored by servers that enable the ServiceTopology feature.
 	// +optional
 	TopologyKeys []string
 }
@@ -3715,8 +3711,6 @@ type ServicePort struct {
 	// RFC-6335 and http://www.iana.org/assignments/service-names).
 	// Non-standard protocols should use prefixed names such as
 	// mycompany.com/my-custom-protocol.
-	// This is a beta field that is guarded by the ServiceAppProtocol feature
-	// gate and enabled by default.
 	// +optional
 	AppProtocol *string
 
@@ -3867,8 +3861,6 @@ type EndpointPort struct {
 	// RFC-6335 and http://www.iana.org/assignments/service-names).
 	// Non-standard protocols should use prefixed names such as
 	// mycompany.com/my-custom-protocol.
-	// This is a beta field that is guarded by the ServiceAppProtocol feature
-	// gate and enabled by default.
 	// +optional
 	AppProtocol *string
 }
@@ -4602,7 +4594,12 @@ const (
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// Event is a report of an event somewhere in the cluster.
+// Event is a report of an event somewhere in the cluster.  Events
+// have a limited retention time and triggers and messages may evolve
+// with time.  Event consumers should not rely on the timing of an event
+// with a given Reason reflecting a consistent underlying trigger, or the
+// continued existence of events with that Reason.  Events should be
+// treated as informative, best-effort, supplemental data.
 // TODO: Decide whether to store these separately or with the object they apply to.
 type Event struct {
 	metav1.TypeMeta
@@ -4931,7 +4928,7 @@ type Secret struct {
 	// base64 encoded string, representing the arbitrary (possibly non-string)
 	// data value here.
 	// +optional
-	Data map[string][]byte
+	Data map[string][]byte `datapolicy:"password,security-key,token"`
 
 	// Used to facilitate programmatic handling of secret data.
 	// +optional
