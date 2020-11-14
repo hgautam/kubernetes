@@ -4249,22 +4249,6 @@ func ValidateService(service *core.Service) field.ErrorList {
 		allErrs = append(allErrs, field.NotSupported(specPath.Child("type"), service.Spec.Type, supportedServiceType.List()))
 	}
 
-	if service.Spec.Type == core.ServiceTypeLoadBalancer {
-		portsPath := specPath.Child("ports")
-		includeProtocols := sets.NewString()
-		for i := range service.Spec.Ports {
-			portPath := portsPath.Index(i)
-			if !supportedPortProtocols.Has(string(service.Spec.Ports[i].Protocol)) {
-				allErrs = append(allErrs, field.Invalid(portPath.Child("protocol"), service.Spec.Ports[i].Protocol, "cannot create an external load balancer with non-TCP/UDP/SCTP ports"))
-			} else {
-				includeProtocols.Insert(string(service.Spec.Ports[i].Protocol))
-			}
-		}
-		if includeProtocols.Len() > 1 {
-			allErrs = append(allErrs, field.Invalid(portsPath, service.Spec.Ports, "cannot create an external load balancer with mix protocols"))
-		}
-	}
-
 	if service.Spec.Type == core.ServiceTypeClusterIP {
 		portsPath := specPath.Child("ports")
 		for i := range service.Spec.Ports {
@@ -4354,6 +4338,16 @@ func ValidateService(service *core.Service) field.ErrorList {
 		_, err := apiservice.GetLoadBalancerSourceRanges(service)
 		if err != nil {
 			allErrs = append(allErrs, field.Invalid(fieldPath, val, "must be a list of IP ranges. For example, 10.240.0.0/24,10.250.0.0/24 "))
+		}
+	}
+
+	if service.Spec.AllocateLoadBalancerNodePorts != nil && service.Spec.Type != core.ServiceTypeLoadBalancer {
+		allErrs = append(allErrs, field.Forbidden(specPath.Child("allocateLoadBalancerNodePorts"), "may only be used when `type` is 'LoadBalancer'"))
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.ServiceLBNodePortControl) {
+		if service.Spec.Type == core.ServiceTypeLoadBalancer && service.Spec.AllocateLoadBalancerNodePorts == nil {
+			allErrs = append(allErrs, field.Required(field.NewPath("allocateLoadBalancerNodePorts"), ""))
 		}
 	}
 

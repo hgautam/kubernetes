@@ -10288,12 +10288,12 @@ func TestValidateServiceCreate(t *testing.T) {
 			numErrs: 0,
 		},
 		{
-			name: "invalid load balancer with mix protocol",
+			name: "load balancer with mix protocol",
 			tweakSvc: func(s *core.Service) {
 				s.Spec.Type = core.ServiceTypeLoadBalancer
 				s.Spec.Ports = append(s.Spec.Ports, core.ServicePort{Name: "q", Port: 12345, Protocol: "UDP", TargetPort: intstr.FromInt(12345)})
 			},
-			numErrs: 1,
+			numErrs: 0,
 		},
 		{
 			name: "valid 1",
@@ -11166,6 +11166,13 @@ func TestValidateServiceCreate(t *testing.T) {
 			tweakSvc: func(s *core.Service) {
 				s.Spec.ClusterIP = "10.0.0.10"
 				s.Spec.ClusterIPs = []string{"10.0.0.1"}
+			},
+			numErrs: 1,
+		},
+		{
+			name: "Use AllocateLoadBalancerNodePorts when type is not LoadBalancer",
+			tweakSvc: func(s *core.Service) {
+				s.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(true)
 			},
 			numErrs: 1,
 		},
@@ -13536,6 +13543,13 @@ func TestValidateServiceUpdate(t *testing.T) {
 			tweakSvc: func(oldSvc, newSvc *core.Service) {
 				oldSvc.Spec.Ports = []core.ServicePort{{Name: "a", Port: 443, TargetPort: intstr.FromInt(3000), Protocol: "TCP"}}
 				newSvc.Spec.Ports = []core.ServicePort{{Name: "a", Port: 443, TargetPort: intstr.FromInt(3000), Protocol: "TCP", AppProtocol: utilpointer.StringPtr("~https")}}
+			},
+			numErrs: 1,
+		},
+		{
+			name: "Set AllocateLoadBalancerNodePorts when type is not LoadBalancer",
+			tweakSvc: func(oldSvc, newSvc *core.Service) {
+				newSvc.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(true)
 			},
 			numErrs: 1,
 		},

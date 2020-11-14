@@ -30,6 +30,7 @@ pkg/apis/events/v1
 pkg/apis/events/v1beta1
 pkg/apis/extensions/v1beta1
 pkg/apis/flowcontrol/v1alpha1
+pkg/apis/flowcontrol/v1beta1
 pkg/apis/networking/v1
 pkg/apis/networking/v1beta1
 pkg/apis/node/v1alpha1
@@ -383,7 +384,6 @@ staging/src/k8s.io/client-go/tools/leaderelection
 staging/src/k8s.io/client-go/tools/leaderelection/resourcelock
 staging/src/k8s.io/client-go/tools/record
 staging/src/k8s.io/client-go/tools/reference
-staging/src/k8s.io/client-go/transport
 staging/src/k8s.io/client-go/util/exec
 staging/src/k8s.io/client-go/util/flowcontrol
 staging/src/k8s.io/client-go/util/jsonpath

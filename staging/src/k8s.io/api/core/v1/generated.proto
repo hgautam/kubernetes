@@ -816,6 +816,7 @@ message ContainerPort {
   // Protocol for port. Must be UDP, TCP, or SCTP.
   // Defaults to "TCP".
   // +optional
+  // +default="TCP"
   optional string protocol = 4;
 
   // What host IP to bind the external port to.
@@ -2036,6 +2037,12 @@ message LoadBalancerIngress {
   // (typically AWS load-balancers)
   // +optional
   optional string hostname = 2;
+
+  // Ports is a list of records of service ports
+  // If used, every port defined in the service should have an entry in it
+  // +listType=atomic
+  // +optional
+  repeated PortStatus ports = 4;
 }
 
 // LoadBalancerStatus represents the status of a load-balancer.
@@ -3765,6 +3772,29 @@ message PodTemplateSpec {
   optional PodSpec spec = 2;
 }
 
+message PortStatus {
+  // Port is the port number of the service port of which status is recorded here
+  optional int32 port = 1;
+
+  // Protocol is the protocol of the service port of which status is recorded here
+  // The supported values are: "TCP", "UDP", "SCTP"
+  optional string protocol = 2;
+
+  // Error is to record the problem with the service port
+  // The format of the error shall comply with the following rules:
+  // - built-in error values shall be specified in this file and those shall use
+  //   CamelCase names
+  // - cloud provider specific error values must have names that comply with the
+  //   format foo.example.com/CamelCase.
+  // ---
+  // The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+  // +optional
+  // +kubebuilder:validation:Required
+  // +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`
+  // +kubebuilder:validation:MaxLength=316
+  optional string error = 3;
+}
+
 // PortworxVolumeSource represents a Portworx volume resource.
 message PortworxVolumeSource {
   // VolumeID uniquely identifies a Portworx volume
@@ -4984,6 +5014,15 @@ message ServiceSpec {
   // wiped when updating a service to type ExternalName.
   // +optional
   optional string ipFamilyPolicy = 17;
+
+  // allocateLoadBalancerNodePorts defines if NodePorts will be automatically
+  // allocated for services with type LoadBalancer.  Default is "true". It may be
+  // set to "false" if the cluster load-balancer does not rely on NodePorts.
+  // allocateLoadBalancerNodePorts may only be set for services with type LoadBalancer
+  // and will be cleared if the type is changed to any other type.
+  // This field is alpha-level and is only honored by servers that enable the ServiceLBNodePortControl feature.
+  // +optional
+  optional bool allocateLoadBalancerNodePorts = 20;
 }
 
 // ServiceStatus represents the current status of a service.
@@ -4992,6 +5031,14 @@ message ServiceStatus {
   // if one is present.
   // +optional
   optional LoadBalancerStatus loadBalancer = 1;
+
+  // Current service state
+  // +optional
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated k8s.io.apimachinery.pkg.apis.meta.v1.Condition conditions = 2;
 }
 
 // SessionAffinityConfig represents the configurations of session affinity.

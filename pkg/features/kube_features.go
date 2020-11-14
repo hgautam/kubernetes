@@ -432,6 +432,7 @@ const (
 
 	// owner: @huffmanca
 	// alpha: v1.19
+	// beta: v1.20
 	//
 	// Determines if a CSI Driver supports applying fsGroup.
 	CSIVolumeFSGroupPolicy featuregate.Feature = "CSIVolumeFSGroupPolicy"
@@ -707,6 +708,18 @@ const (
 	// alpha: v1.20
 	// Adds support for kubelet to detect node shutdown and gracefully terminate pods prior to the node being shutdown.
 	GracefulNodeShutdown featuregate.Feature = "GracefulNodeShutdown"
+
+	// owner: @andrewsykim @uablrek
+	// alpha: v1.20
+	//
+	// Allows control if NodePorts shall be created for services with "type: LoadBalancer" by defining the spec.AllocateLoadBalancerNodePorts field (bool)
+	ServiceLBNodePortControl featuregate.Feature = "ServiceLBNodePortControl"
+
+	// owner: @janosi
+	// alpha: v1.20
+	//
+	// Enables the usage of different protocols in the same Service with type=LoadBalancer
+	MixedProtocolLBService featuregate.Feature = "MixedProtocolLBService"
 )
 
 func init() {
@@ -770,7 +783,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	CSIStorageCapacity:             {Default: false, PreRelease: featuregate.Alpha},
 	CSIServiceAccountToken:         {Default: false, PreRelease: featuregate.Alpha},
 	GenericEphemeralVolume:         {Default: false, PreRelease: featuregate.Alpha},
-	CSIVolumeFSGroupPolicy:         {Default: false, PreRelease: featuregate.Alpha},
+	CSIVolumeFSGroupPolicy:         {Default: true, PreRelease: featuregate.Beta},
 	RuntimeClass:                   {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.23
 	NodeLease:                      {Default: true, PreRelease: featuregate.GA, LockToDefault: true},
 	SCTPSupport:                    {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.22
@@ -813,6 +826,8 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	ExecProbeTimeout:                               {Default: true, PreRelease: featuregate.GA}, // lock to default in v1.21 and remove in v1.22
 	KubeletCredentialProviders:                     {Default: false, PreRelease: featuregate.Alpha},
 	GracefulNodeShutdown:                           {Default: false, PreRelease: featuregate.Alpha},
+	ServiceLBNodePortControl:                       {Default: false, PreRelease: featuregate.Alpha},
+	MixedProtocolLBService:                         {Default: false, PreRelease: featuregate.Alpha},
 
 	// inherited features from generic apiserver, relisted here to get a conflict if it is changed
 	// unintentionally on either side:
@@ -823,7 +838,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	genericfeatures.APIListChunking:         {Default: true, PreRelease: featuregate.Beta},
 	genericfeatures.DryRun:                  {Default: true, PreRelease: featuregate.GA},
 	genericfeatures.ServerSideApply:         {Default: true, PreRelease: featuregate.Beta},
-	genericfeatures.APIPriorityAndFairness:  {Default: false, PreRelease: featuregate.Alpha},
+	genericfeatures.APIPriorityAndFairness:  {Default: true, PreRelease: featuregate.Beta},
 	genericfeatures.WarningHeaders:          {Default: true, PreRelease: featuregate.Beta},
 
 	// features that enable backwards compatibility but are scheduled to be removed
