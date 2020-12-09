@@ -622,6 +622,7 @@ function write-pki-data {
   if [[ -n "${KUBE_PKI_READERS_GROUP:-}" ]]; then
     (umask 027; echo "${data}" | base64 --decode > "${path}")
     chgrp "${KUBE_PKI_READERS_GROUP:-}" "${path}"
+    chmod g+r "${path}"
   else
     (umask 077; echo "${data}" | base64 --decode > "${path}")
   fi
@@ -2109,6 +2110,10 @@ function start-kube-controller-manager {
 # Assumed vars (which are calculated in compute-master-manifest-variables)
 #   DOCKER_REGISTRY
 function start-kube-scheduler {
+  if [[ "${KUBE_SCHEDULER_CRP:-}" == "true" ]]; then
+    echo "kube-scheduler is configured to be deployed through CRP."
+    return
+  fi
   echo "Start kubernetes scheduler"
   create-kubeconfig "kube-scheduler" "${KUBE_SCHEDULER_TOKEN}"
   # User and group should never contain characters that need to be quoted
