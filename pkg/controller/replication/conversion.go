@@ -36,6 +36,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	appsv1apply "k8s.io/client-go/applyconfigurations/apps/v1"
+	appsv1autoscaling "k8s.io/client-go/applyconfigurations/autoscaling/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	appsv1client "k8s.io/client-go/kubernetes/typed/apps/v1"
@@ -247,6 +249,14 @@ func (c conversionClient) Patch(ctx context.Context, name string, pt types.Patch
 	return nil, errors.New("Patch() is not implemented for conversionClient")
 }
 
+func (c conversionClient) Apply(ctx context.Context, rs *appsv1apply.ReplicaSetApplyConfiguration, opts metav1.ApplyOptions) (*apps.ReplicaSet, error) {
+	return nil, errors.New("Apply() is not implemented for conversionClient")
+}
+
+func (c conversionClient) ApplyStatus(ctx context.Context, rs *appsv1apply.ReplicaSetApplyConfiguration, opts metav1.ApplyOptions) (*apps.ReplicaSet, error) {
+	return nil, errors.New("ApplyStatus() is not implemented for conversionClient")
+}
+
 func (c conversionClient) GetScale(ctx context.Context, name string, options metav1.GetOptions) (result *autoscalingv1.Scale, err error) {
 	// This is not used by RSC.
 	return nil, errors.New("GetScale() is not implemented for conversionClient")
@@ -255,6 +265,10 @@ func (c conversionClient) GetScale(ctx context.Context, name string, options met
 func (c conversionClient) UpdateScale(ctx context.Context, name string, scale *autoscalingv1.Scale, opts metav1.UpdateOptions) (result *autoscalingv1.Scale, err error) {
 	// This is not used by RSC.
 	return nil, errors.New("UpdateScale() is not implemented for conversionClient")
+}
+
+func (c conversionClient) ApplyScale(ctx context.Context, name string, scale *appsv1autoscaling.ScaleApplyConfiguration, opts metav1.ApplyOptions) (*autoscalingv1.Scale, error) {
+	return nil, errors.New("ApplyScale() is not implemented for conversionClient")
 }
 
 func convertSlice(rcList []*v1.ReplicationController) ([]*apps.ReplicaSet, error) {

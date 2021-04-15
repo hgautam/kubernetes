@@ -318,7 +318,7 @@ func TestGetPodStatus(t *testing.T) {
 	}
 
 	// Set fake sandbox and faked containers to fakeRuntime.
-	sandbox, _ := makeAndSetFakePod(t, m, fakeRuntime, pod)
+	makeAndSetFakePod(t, m, fakeRuntime, pod)
 
 	podStatus, err := m.GetPodStatus(pod.UID, pod.Name, pod.Namespace)
 	assert.NoError(t, err)
@@ -326,9 +326,6 @@ func TestGetPodStatus(t *testing.T) {
 	assert.Equal(t, pod.Name, podStatus.Name)
 	assert.Equal(t, pod.Namespace, podStatus.Namespace)
 	assert.Equal(t, apitest.FakePodSandboxIPs, podStatus.IPs)
-	for _, containerStatus := range podStatus.ContainerStatuses {
-		assert.Equal(t, sandbox.Id, containerStatus.PodSandboxID)
-	}
 }
 
 func TestGetPods(t *testing.T) {
@@ -1005,9 +1002,10 @@ func getKillMapWithInitContainers(pod *v1.Pod, status *kubecontainer.PodStatus, 
 
 func verifyActions(t *testing.T, expected, actual *podActions, desc string) {
 	if actual.ContainersToKill != nil {
-		// Clear the message field since we don't need to verify the message.
+		// Clear the message and reason fields since we don't need to verify them.
 		for k, info := range actual.ContainersToKill {
 			info.message = ""
+			info.reason = ""
 			actual.ContainersToKill[k] = info
 		}
 	}
@@ -1373,6 +1371,41 @@ func TestComputePodActionsWithInitAndEphemeralContainers(t *testing.T) {
 		actions := m.computePodActions(pod, status)
 		verifyActions(t, &test.actions, &actions, desc)
 	}
+}
+
+func TestSyncPodWithSandboxAndDeletedPod(t *testing.T) {
+	fakeRuntime, _, m, err := createTestRuntimeManager()
+	assert.NoError(t, err)
+	fakeRuntime.ErrorOnSandboxCreate = true
+
+	containers := []v1.Container{
+		{
+			Name:            "foo1",
+			Image:           "busybox",
+			ImagePullPolicy: v1.PullIfNotPresent,
+		},
+	}
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "12345678",
+			Name:      "foo",
+			Namespace: "new",
+		},
+		Spec: v1.PodSpec{
+			Containers: containers,
+		},
+	}
+
+	backOff := flowcontrol.NewBackOff(time.Second, time.Minute)
+
+	// GetPodStatus and the following SyncPod will not return errors in the
+	// case where the pod has been deleted. We are not adding any pods into
+	// the fakePodProvider so they are 'deleted'.
+	podStatus, err := m.GetPodStatus(pod.UID, pod.Name, pod.Namespace)
+	assert.NoError(t, err)
+	result := m.SyncPod(pod, podStatus, []v1.Secret{}, backOff)
+	// This will return an error if the pod has _not_ been deleted.
+	assert.NoError(t, result.Error())
 }
 
 func makeBasePodAndStatusWithInitAndEphemeralContainers() (*v1.Pod, *kubecontainer.PodStatus) {

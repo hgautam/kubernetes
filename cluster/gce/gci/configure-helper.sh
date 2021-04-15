@@ -608,7 +608,7 @@ function append_or_replace_prefixed_line {
   local -r prefix="${2:-}"
   local -r suffix="${3:-}"
   local -r dirname=$(dirname "${file}")
-  local -r tmpfile=$(mktemp -t filtered.XXXX --tmpdir="${dirname}")
+  local -r tmpfile=$(mktemp "${dirname}/filtered.XXXX")
 
   touch "${file}"
   awk -v pfx="${prefix}" 'substr($0,1,length(pfx)) != pfx { print }' "${file}" > "${tmpfile}"
@@ -1266,18 +1266,11 @@ EOF
   fi
 }
 
-# Create kubeconfig files for control plane components.
 function create-kubeconfig {
   local component=$1
   local token=$2
   echo "Creating kubeconfig file for component ${component}"
   mkdir -p "/etc/srv/kubernetes/${component}"
-
-  local kube_apiserver="localhost"
-  if [[ ${KUBECONFIG_USE_HOST_IP:-} == "true" ]] ; then
-    kube_apiserver=$(hostname -i)
-  fi
-  
   cat <<EOF >"/etc/srv/kubernetes/${component}/kubeconfig"
 apiVersion: v1
 kind: Config
@@ -1289,7 +1282,7 @@ clusters:
 - name: local
   cluster:
     insecure-skip-tls-verify: true
-    server: https://${kube_apiserver}:443
+    server: https://localhost:443
 contexts:
 - context:
     cluster: local
@@ -1460,40 +1453,106 @@ function create-master-etcd-apiserver-auth {
    fi
 }
 
+
+function docker-installed {
+    if systemctl cat docker.service &> /dev/null ; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# util function to add a docker option to daemon.json file only if the daemon.json file is present.
+# accepts only one argument (docker options)
+function addockeropt {
+	DOCKER_OPTS_FILE=/etc/docker/daemon.json
+	if [ "$#" -lt 1 ]; then
+	echo "No arguments are passed while adding docker options. Expect one argument"
+	exit 1
+	elif [ "$#" -gt 1 ]; then
+	echo "Only one argument is accepted"
+	exit 1
+	fi
+	# appends the given input to the docker opts file i.e. /etc/docker/daemon.json file
+	if [ -f "$DOCKER_OPTS_FILE" ]; then
+	cat >> "${DOCKER_OPTS_FILE}" <<EOF
+  $1
+EOF
+	fi
+}
+
+function set_docker_options_non_ubuntu() {
+  # set docker options mtu and storage driver for non-ubuntu
+  # as it is default for ubuntu
+   if [[ -n "$(command -v lsb_release)" && $(lsb_release -si) == "Ubuntu" ]]; then
+      echo "Not adding docker options on ubuntu, as these are default on ubuntu. Bailing out..."
+      return
+   fi
+
+   addockeropt "\"mtu\": 1460,"
+   addockeropt "\"storage-driver\": \"overlay2\","
+
+   echo "setting live restore"
+   # Disable live-restore if the environment variable is set.
+   if [[ "${DISABLE_DOCKER_LIVE_RESTORE:-false}" == "true" ]]; then
+      addockeropt "\"live-restore\": \"false\","
+   fi
+}
+
 function assemble-docker-flags {
-  echo "Assemble docker command line flags"
-  local docker_opts="-p /var/run/docker.pid --iptables=false --ip-masq=false"
-  if [[ "${TEST_CLUSTER:-}" == "true" ]]; then
-    docker_opts+=" --log-level=debug"
-  else
-    docker_opts+=" --log-level=warn"
-  fi
-  if [[ "${NETWORK_PROVIDER:-}" == "kubenet" || "${NETWORK_PROVIDER:-}" == "cni" ]]; then
-    # set docker0 cidr to private ip address range to avoid conflict with cbr0 cidr range
-    docker_opts+=" --bip=169.254.123.1/24"
-  else
-    docker_opts+=" --bridge=cbr0"
+  echo "Assemble docker options"
+
+    # log the contents of the /etc/docker/daemon.json if already exists
+  if [ -f /etc/docker/daemon.json ]; then
+    echo "Contents of the old docker config"
+    cat /etc/docker/daemon.json
   fi
 
+  cat <<EOF >/etc/docker/daemon.json
+{
+EOF
+
+addockeropt "\"pidfile\": \"/var/run/docker.pid\",
+  \"iptables\": false,
+  \"ip-masq\": false,"
+
+  echo "setting log-level"
+  if [[ "${TEST_CLUSTER:-}" == "true" ]]; then
+    addockeropt "\"log-level\": \"debug\","
+  else
+    addockeropt "\"log-level\": \"warn\","
+  fi
+
+  echo "setting network bridge"
+  if [[ "${NETWORK_PROVIDER:-}" == "kubenet" || "${NETWORK_PROVIDER:-}" == "cni" ]]; then
+    # set docker0 cidr to private ip address range to avoid conflict with cbr0 cidr range
+    addockeropt "\"bip\": \"169.254.123.1/24\","
+  else
+    addockeropt "\"bridge\": \"cbr0\","
+  fi
+
+  echo "setting registry mirror"
+  # TODO (vteratipally)  move the registry-mirror completely to /etc/docker/daemon.json
+  local docker_opts=""
   # Decide whether to enable a docker registry mirror. This is taken from
   # the "kube-env" metadata value.
   if [[ -n "${DOCKER_REGISTRY_MIRROR_URL:-}" ]]; then
-    echo "Enable docker registry mirror at: ${DOCKER_REGISTRY_MIRROR_URL}"
-    docker_opts+=" --registry-mirror=${DOCKER_REGISTRY_MIRROR_URL}"
+      docker_opts+="--registry-mirror=${DOCKER_REGISTRY_MIRROR_URL} "
   fi
 
+  set_docker_options_non_ubuntu
+
+  echo "setting docker logging options"
   # Configure docker logging
-  docker_opts+=" --log-driver=${DOCKER_LOG_DRIVER:-json-file}"
-  docker_opts+=" --log-opt=max-size=${DOCKER_LOG_MAX_SIZE:-10m}"
-  docker_opts+=" --log-opt=max-file=${DOCKER_LOG_MAX_FILE:-5}"
-
-  # Disable live-restore if the environment variable is set.
-
-  if [[ "${DISABLE_DOCKER_LIVE_RESTORE:-false}" == "true" ]]; then
-    docker_opts+=" --live-restore=false"
-  fi
-
-  echo "DOCKER_OPTS=\"${docker_opts} ${EXTRA_DOCKER_OPTS:-}\"" > /etc/default/docker
+  addockeropt "\"log-driver\": \"${DOCKER_LOG_DRIVER:-json-file}\","
+  addockeropt "\"log-opts\": {
+      \"max-size\": \"${DOCKER_LOG_MAX_SIZE:-10m}\",
+      \"max-file\": \"${DOCKER_LOG_MAX_FILE:-5}\"
+    }"
+  cat <<EOF >>/etc/docker/daemon.json
+}
+EOF
+  echo "DOCKER_OPTS=\"${docker_opts}${EXTRA_DOCKER_OPTS:-}\"" > /etc/default/docker
 
   # Ensure TasksMax is sufficient for docker.
   # (https://github.com/kubernetes/kubernetes/issues/51977)
@@ -1513,9 +1572,6 @@ EOF
 # using systemctl.
 function start-kubelet {
   echo "Start kubelet"
-
-  # TODO(#60123): The kubelet should create the cert-dir directory if it doesn't exist
-  mkdir -p /var/lib/kubelet/pki/
 
   local kubelet_bin="${KUBE_HOME}/bin/kubelet"
   local -r version="$("${kubelet_bin}" --version=true | cut -f2 -d " ")"
@@ -1629,6 +1685,7 @@ function prepare-log-file {
 
 # Prepares parameters for kube-proxy manifest.
 # $1 source path of kube-proxy manifest.
+# Assumptions: HOST_PLATFORM and HOST_ARCH are specified by calling detect_host_info.
 function prepare-kube-proxy-manifest-variables {
   local -r src_file=$1;
 
@@ -1678,6 +1735,8 @@ function prepare-kube-proxy-manifest-variables {
   sed -i -e "s@{{kubeconfig}}@${kubeconfig}@g" "${src_file}"
   sed -i -e "s@{{pillar\['kube_docker_registry'\]}}@${kube_docker_registry}@g" "${src_file}"
   sed -i -e "s@{{pillar\['kube-proxy_docker_tag'\]}}@${kube_proxy_docker_tag}@g" "${src_file}"
+  # TODO(#99245): Use multi-arch image and get rid of this.
+  sed -i -e "s@{{pillar\['host_arch'\]}}@${HOST_ARCH}@g" "${src_file}"
   sed -i -e "s@{{params}}@${params}@g" "${src_file}"
   sed -i -e "s@{{container_env}}@${container_env}@g" "${src_file}"
   sed -i -e "s@{{kube_cache_mutation_detector_env_name}}@${kube_cache_mutation_detector_env_name}@g" "${src_file}"
@@ -1703,8 +1762,8 @@ function start-kube-proxy {
 # Replaces the variables in the etcd manifest file with the real values, and then
 # copy the file to the manifest dir
 # $1: value for variable 'suffix'
-# $2: value for variable 'port', for listening to clients
-# $3: value for variable 'server_port', for etcd peering
+# $2: value for variable 'port'
+# $3: value for variable 'server_port'
 # $4: value for variable 'cpulimit'
 # $5: pod name, which should be either etcd or etcd-events
 function prepare-etcd-manifest {
@@ -1718,48 +1777,30 @@ function prepare-etcd-manifest {
   local etcd_apiserver_creds="${ETCD_APISERVER_CREDS:-}"
   local etcd_extra_args="${ETCD_EXTRA_ARGS:-}"
   local suffix="$1"
-  local etcd_livenessprobe_port="$2"
+  local etcd_listen_metrics_port="$2"
+  local etcdctl_certs=""
 
   if [[ -n "${INITIAL_ETCD_CLUSTER_STATE:-}" ]]; then
     cluster_state="${INITIAL_ETCD_CLUSTER_STATE}"
   fi
-
-  # Configure mTLS for etcd peers.
   if [[ -n "${ETCD_CA_CERT:-}" && -n "${ETCD_PEER_KEY:-}" && -n "${ETCD_PEER_CERT:-}" ]]; then
     etcd_creds=" --peer-trusted-ca-file /etc/srv/kubernetes/etcd-ca.crt --peer-cert-file /etc/srv/kubernetes/etcd-peer.crt --peer-key-file /etc/srv/kubernetes/etcd-peer.key -peer-client-cert-auth "
     etcd_protocol="https"
   fi
 
-  # host_primary_ip is the primary internal IP of the host.
-  # Override host primary IP if specifically provided.
-  local host_primary_ip
-  host_primary_ip="${HOST_PRIMARY_IP:-$(hostname -i)}"
-
-  # Configure mTLS for clients (e.g. kube-apiserver).
-  # mTLS should only be enabled for etcd server but not etcd-events. If $1 suffix is empty, it's etcd server.
-  local etcd_listen_metrics_urls=""
+  # mTLS should only be enabled for etcd server but not etcd-events. if $1 suffix is empty, it's etcd server.
   if [[ -z "${suffix}" && -n "${ETCD_APISERVER_CA_KEY:-}" && -n "${ETCD_APISERVER_CA_CERT:-}" && -n "${ETCD_APISERVER_SERVER_KEY:-}" && -n "${ETCD_APISERVER_SERVER_CERT:-}" && -n "${ETCD_APISERVER_CLIENT_KEY:-}" && -n "${ETCD_APISERVER_CLIENT_CERT:-}" ]]; then
     etcd_apiserver_creds=" --client-cert-auth --trusted-ca-file ${ETCD_APISERVER_CA_CERT_PATH} --cert-file ${ETCD_APISERVER_SERVER_CERT_PATH} --key-file ${ETCD_APISERVER_SERVER_KEY_PATH} "
+    etcdctl_certs="--cacert ${ETCD_APISERVER_CA_CERT_PATH} --cert ${ETCD_APISERVER_CLIENT_CERT_PATH} --key ${ETCD_APISERVER_CLIENT_KEY_PATH}"
     etcd_apiserver_protocol="https"
-    etcd_livenessprobe_port="2382"
-    etcd_listen_metrics_urls="http://${ETCD_LISTEN_CLIENT_IP:-127.0.0.1}:${etcd_livenessprobe_port}"
-    if [[ ${ETCD_LISTEN_ON_HOST_IP:-} == "true" ]]; then
-      etcd_listen_metrics_urls+=",http://${host_primary_ip}:${etcd_livenessprobe_port}"
-    fi
-    etcd_extra_args+=" --listen-metrics-urls=${etcd_listen_metrics_urls} "
+    etcd_listen_metrics_port="2382"
+    etcd_extra_args+=" --listen-metrics-urls=http://${ETCD_LISTEN_CLIENT_IP:-127.0.0.1}:${etcd_listen_metrics_port} "
   fi
 
   if [[ -n "${ETCD_PROGRESS_NOTIFY_INTERVAL:-}" ]]; then
     etcd_extra_args+=" --experimental-watch-progress-notify-interval=${ETCD_PROGRESS_NOTIFY_INTERVAL}"
   fi
 
-  # If etcd is configured to listen on host IP, an additional client listening URL is added.
-  local etcd_listen_client_urls="${etcd_apiserver_protocol}://${ETCD_LISTEN_CLIENT_IP:-127.0.0.1}:$2"
-  if [[ ${ETCD_LISTEN_ON_HOST_IP:-} == "true" ]] ; then
-    etcd_listen_client_urls+=",${etcd_apiserver_protocol}://${host_primary_ip}:$2"
-  fi
-
-  # Generate etcd member URLs.
   for host in $(echo "${INITIAL_ETCD_CLUSTER:-${host_name}}" | tr "," "\n"); do
     etcd_host="etcd-${host}=${etcd_protocol}://${host}:$3"
     if [[ -n "${etcd_cluster}" ]]; then
@@ -1779,7 +1820,6 @@ function prepare-etcd-manifest {
   sed -i -e "s@{{ *etcd_cluster *}}@$etcd_cluster@g" "${temp_file}"
   sed -i -e "s@{{ *liveness_probe_initial_delay *}}@${ETCD_LIVENESS_PROBE_INITIAL_DELAY_SEC:-15}@g" "${temp_file}"
   sed -i -e "s@{{ *listen_client_ip *}}@${ETCD_LISTEN_CLIENT_IP:-127.0.0.1}@g" "${temp_file}"
-  sed -i -e "s@{{ *etcd_listen_client_urls *}}@${etcd_listen_client_urls:-}@g" "${temp_file}"
   # Get default storage backend from manifest file.
   local -r default_storage_backend=$( \
     grep -o "{{ *pillar\.get('storage_backend', '\(.*\)') *}}" "${temp_file}" | \
@@ -1808,9 +1848,9 @@ function prepare-etcd-manifest {
   sed -i -e "s@{{ *etcd_protocol *}}@$etcd_protocol@g" "${temp_file}"
   sed -i -e "s@{{ *etcd_apiserver_protocol *}}@$etcd_apiserver_protocol@g" "${temp_file}"
   sed -i -e "s@{{ *etcd_creds *}}@$etcd_creds@g" "${temp_file}"
+  sed -i -e "s@{{ *etcdctl_certs *}}@$etcdctl_certs@g" "${temp_file}"
   sed -i -e "s@{{ *etcd_apiserver_creds *}}@$etcd_apiserver_creds@g" "${temp_file}"
   sed -i -e "s@{{ *etcd_extra_args *}}@$etcd_extra_args@g" "${temp_file}"
-  sed -i -e "s@{{ *etcd_livenessprobe_port *}}@$etcd_livenessprobe_port@g" "${temp_file}"
   if [[ -n "${ETCD_VERSION:-}" ]]; then
     sed -i -e "s@{{ *pillar\.get('etcd_version', '\(.*\)') *}}@${ETCD_VERSION}@g" "${temp_file}"
   else
@@ -1818,6 +1858,12 @@ function prepare-etcd-manifest {
   fi
   # Replace the volume host path.
   sed -i -e "s@/mnt/master-pd/var/etcd@/mnt/disks/master-pd/var/etcd@g" "${temp_file}"
+  # Replace the run as user and run as group
+  container_security_context=""
+  if [[ -n "${ETCD_RUNASUSER:-}" && -n "${ETCD_RUNASGROUP:-}" ]]; then
+    container_security_context="\"securityContext\": {\"runAsUser\": ${ETCD_RUNASUSER}, \"runAsGroup\": ${ETCD_RUNASGROUP}, \"allowPrivilegeEscalation\": false, \"capabilities\": {\"drop\": [\"all\"]}},"
+  fi
+  sed -i -e "s@{{security_context}}@${container_security_context}@g" "${temp_file}"
   mv "${temp_file}" /etc/kubernetes/manifests
 }
 
@@ -1838,10 +1884,13 @@ function start-etcd-servers {
   if [[ -e /etc/init.d/etcd ]]; then
     rm -f /etc/init.d/etcd
   fi
-  prepare-log-file /var/log/etcd.log
+  if [[ -n "${ETCD_RUNASUSER:-}" && -n "${ETCD_RUNASGROUP:-}" ]]; then
+    chown -R "${ETCD_RUNASUSER}":"${ETCD_RUNASGROUP}" /mnt/disks/master-pd/var/etcd
+  fi
+  prepare-log-file /var/log/etcd.log "${ETCD_RUNASUSER:-0}"
   prepare-etcd-manifest "" "2379" "2380" "200m" "etcd.manifest"
 
-  prepare-log-file /var/log/etcd-events.log
+  prepare-log-file /var/log/etcd-events.log "${ETCD_RUNASUSER:-0}"
   prepare-etcd-manifest "-events" "4002" "2381" "100m" "etcd-events.manifest"
 }
 
@@ -2003,16 +2052,24 @@ function run-kube-controller-manager-as-non-root {
 #   CLOUD_CONFIG_MOUNT
 #   DOCKER_REGISTRY
 function start-kube-controller-manager {
+  if [[ -e "${KUBE_HOME}/bin/gke-internal-configure-helper.sh" ]]; then
+    if ! deploy-kube-controller-manager-via-kube-up; then
+      echo "kube-controller-manager is configured to not be deployed through kube-up."
+      return
+    fi
+  fi
   echo "Start kubernetes controller-manager"
   create-kubeconfig "kube-controller-manager" "${KUBE_CONTROLLER_MANAGER_TOKEN}"
   prepare-log-file /var/log/kube-controller-manager.log
   # Calculate variables and assemble the command line.
   local params=("${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=2"}" "${CONTROLLER_MANAGER_TEST_ARGS:-}" "${CLOUD_CONFIG_OPT}")
+  local config_path='/etc/srv/kubernetes/kube-controller-manager/kubeconfig'
   params+=("--use-service-account-credentials")
   params+=("--cloud-provider=gce")
-  params+=("--kubeconfig=/etc/srv/kubernetes/kube-controller-manager/kubeconfig")
+  params+=("--kubeconfig=${config_path}" "--authentication-kubeconfig=${config_path}" "--authorization-kubeconfig=${config_path}")
   params+=("--root-ca-file=${CA_CERT_BUNDLE_PATH}")
   params+=("--service-account-private-key-file=${SERVICEACCOUNT_KEY_PATH}")
+  params+=("--volume-host-allow-local-loopback=false")
   if [[ -n "${ENABLE_GARBAGE_COLLECTOR:-}" ]]; then
     params+=("--enable-garbage-collector=${ENABLE_GARBAGE_COLLECTOR}")
   fi
@@ -2110,9 +2167,11 @@ function start-kube-controller-manager {
 # Assumed vars (which are calculated in compute-master-manifest-variables)
 #   DOCKER_REGISTRY
 function start-kube-scheduler {
-  if [[ "${KUBE_SCHEDULER_CRP:-}" == "true" ]]; then
-    echo "kube-scheduler is configured to be deployed through CRP."
-    return
+  if [[ -e "${KUBE_HOME}/bin/gke-internal-configure-helper.sh" ]]; then
+    if ! deploy-kube-scheduler-via-kube-up; then
+      echo "kube-scheduler is configured to not be deployed through kube-up."
+      return
+    fi
   fi
   echo "Start kubernetes scheduler"
   create-kubeconfig "kube-scheduler" "${KUBE_SCHEDULER_TOKEN}"
@@ -2141,6 +2200,10 @@ function start-kube-scheduler {
       params+=("--policy-config-file=/etc/srv/kubernetes/kube-scheduler/policy-config")
     fi
   fi
+
+  local config_path
+  config_path='/etc/srv/kubernetes/kube-scheduler/kubeconfig'
+  params+=("--authentication-kubeconfig=${config_path}" "--authorization-kubeconfig=${config_path}")
 
   local paramstring
   paramstring="$(convert-manifest-params "${params[*]}")"
@@ -2233,10 +2296,8 @@ function download-extra-addons {
     "--retry-delay" "3"
     "--silent"
     "--show-error"
+    "--retry-connrefused"
   )
-  if [[ -n "${CURL_RETRY_CONNREFUSED:-}" ]]; then
-    curl_cmd+=("${CURL_RETRY_CONNREFUSED}")
-  fi
   if [[ -n "${EXTRA_ADDONS_HEADER:-}" ]]; then
     curl_cmd+=("-H" "${EXTRA_ADDONS_HEADER}")
   fi
@@ -2247,19 +2308,32 @@ function download-extra-addons {
 }
 
 # A function that fetches a GCE metadata value and echoes it out.
+# Args:
+#   $1 : URL path after /computeMetadata/v1/ (without heading slash).
+#   $2 : An optional default value to echo out if the fetch fails.
 #
-# $1: URL path after /computeMetadata/v1/ (without heading slash).
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
 function get-metadata-value {
-    # We do not want quotes for CURL_RETRY_CONNREFUSED
-    # shellcheck disable=SC2086
-    curl \
-        --retry 5 \
-        --retry-delay 3 \
-        ${CURL_RETRY_CONNREFUSED} \
-        --fail \
-        --silent \
-        -H 'Metadata-Flavor: Google' \
-        "http://metadata/computeMetadata/v1/${1}"
+  local default="${2:-}"
+
+  local status
+  curl \
+      --retry 5 \
+      --retry-delay 3 \
+      --retry-connrefused \
+      --fail \
+      --silent \
+      -H 'Metadata-Flavor: Google' \
+      "http://metadata/computeMetadata/v1/${1}" \
+  || status="$?"
+  status="${status:-0}"
+
+  if [[ "${status}" -eq 0 || -z "${default}" ]]; then
+    return "${status}"
+  else
+    echo "${default}"
+  fi
 }
 
 # A helper function for copying manifests and setting dir/files
@@ -2778,6 +2852,16 @@ function setup-kubelet-dir {
     echo "Making /var/lib/kubelet executable for kubelet"
     mount -B /var/lib/kubelet /var/lib/kubelet/
     mount -B -o remount,exec,suid,dev /var/lib/kubelet
+
+    # TODO(#60123): The kubelet should create the cert-dir directory if it doesn't exist
+    mkdir -p /var/lib/kubelet/pki/
+
+    # Mount /var/lib/kubelet/pki on a tmpfs so it doesn't persist across
+    # reboots. This can help avoid some rare instances of corrupt cert files
+    # (e.g. created but not written during a shutdown). Kubelet crash-loops
+    # in these cases. Do this after above mount calls so it isn't overwritten.
+    echo "Mounting /var/lib/kubelet/pki on tmpfs"
+    mount -t tmpfs tmpfs /var/lib/kubelet/pki
 }
 
 # Override for GKE custom master setup scripts (no-op outside of GKE).
@@ -2940,21 +3024,28 @@ EOF
     fi
   fi
   cat > "${config_path}" <<EOF
+version = 2
+# Kubernetes requires the cri plugin.
+required_plugins = ["io.containerd.grpc.v1.cri"]
 # Kubernetes doesn't use containerd restart manager.
-disabled_plugins = ["restart"]
+disabled_plugins = ["io.containerd.internal.v1.restart"]
 oom_score = -999
 
 [debug]
   level = "${CONTAINERD_LOG_LEVEL:-"info"}"
 
-[plugins.cri]
+[plugins."io.containerd.grpc.v1.cri"]
   stream_server_address = "127.0.0.1"
   max_container_log_line_size = ${CONTAINERD_MAX_CONTAINER_LOG_LINE:-262144}
-[plugins.cri.cni]
+[plugins."io.containerd.grpc.v1.cri".cni]
   bin_dir = "${KUBE_HOME}/bin"
   conf_dir = "/etc/cni/net.d"
   conf_template = "${cni_template_path}"
-[plugins.cri.registry.mirrors."docker.io"]
+[plugins."io.containerd.grpc.v1.cri".containerd]
+  default_runtime_name = "runc"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+[plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
   endpoint = ["https://mirror.gcr.io","https://registry-1.docker.io"]
 EOF
 
@@ -2962,8 +3053,8 @@ EOF
   cat >> "${config_path}" <<EOF
 # Setup a runtime with the magic name ("test-handler") used for Kubernetes
 # runtime class tests ...
-[plugins.cri.containerd.runtimes.test-handler]
-  runtime_type = "io.containerd.runtime.v1.linux"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.test-handler]
+  runtime_type = "io.containerd.runc.v2"
 EOF
   fi
 
@@ -2982,9 +3073,193 @@ EOF
   systemctl restart containerd
 }
 
+# This function detects the platform/arch of the machine where the script runs,
+# and sets the HOST_PLATFORM and HOST_ARCH environment variables accordingly.
+# Callers can specify HOST_PLATFORM_OVERRIDE and HOST_ARCH_OVERRIDE to skip the detection.
+# This function is adapted from the detect_client_info function in cluster/get-kube-binaries.sh
+# and kube::util::host_os, kube::util::host_arch functions in hack/lib/util.sh
+# This function should be synced with detect_host_info in ./configure.sh
+function detect_host_info() {
+  HOST_PLATFORM=${HOST_PLATFORM_OVERRIDE:-"$(uname -s)"}
+  case "${HOST_PLATFORM}" in
+    Linux|linux)
+      HOST_PLATFORM="linux"
+      ;;
+    *)
+      echo "Unknown, unsupported platform: ${HOST_PLATFORM}." >&2
+      echo "Supported platform(s): linux." >&2
+      echo "Bailing out." >&2
+      exit 2
+  esac
+
+  HOST_ARCH=${HOST_ARCH_OVERRIDE:-"$(uname -m)"}
+  case "${HOST_ARCH}" in
+    x86_64*|i?86_64*|amd64*)
+      HOST_ARCH="amd64"
+      ;;
+    aHOST_arch64*|aarch64*|arm64*)
+      HOST_ARCH="arm64"
+      ;;
+    *)
+      echo "Unknown, unsupported architecture (${HOST_ARCH})." >&2
+      echo "Supported architecture(s): amd64 and arm64." >&2
+      echo "Bailing out." >&2
+      exit 2
+      ;;
+  esac
+}
+
+# Initializes variables used by the log-* functions.
+#
+# get-metadata-value must be defined before calling this function.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-init {
+  # Used by log-* functions.
+  LOG_CLUSTER_ID=$(get-metadata-value 'instance/attributes/cluster-uid' 'get-metadata-value-error')
+  LOG_INSTANCE_NAME=$(hostname)
+  LOG_BOOT_ID=$(journalctl --list-boots | grep -E '^ *0' | awk '{print $2}')
+  declare -Ag LOG_START_TIMES
+  declare -ag LOG_TRAP_STACK
+
+  LOG_STATUS_STARTED='STARTED'
+  LOG_STATUS_COMPLETED='COMPLETED'
+  LOG_STATUS_ERROR='ERROR'
+}
+
+# Sets an EXIT trap.
+# Args:
+#   $1:... : the trap command.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-trap-push {
+  local t="${*:1}"
+  LOG_TRAP_STACK+=("${t}")
+  # shellcheck disable=2064
+  trap "${t}" EXIT
+}
+
+# Removes and restores an EXIT trap.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-trap-pop {
+  # Remove current trap.
+  unset 'LOG_TRAP_STACK[-1]'
+
+  # Restore previous trap.
+  if [ ${#LOG_TRAP_STACK[@]} -ne 0 ]; then
+    local t="${LOG_TRAP_STACK[-1]}"
+    # shellcheck disable=2064
+    trap "${t}" EXIT
+  else
+    # If no traps in stack, clear.
+    trap EXIT
+  fi
+}
+
+# Logs the end of a bootstrap step that errored.
+# Args:
+#  $1 : bootstrap step name.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-error {
+  local bootstep="$1"
+
+  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "error calling '${BASH_COMMAND}'"
+}
+
+# Wraps a command with bootstrap logging.
+# Args:
+#   $1    : bootstrap step name.
+#   $2... : the command to run.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-wrap {
+  local bootstep="$1"
+  local command="${*:2}"
+
+  log-trap-push "log-error ${bootstep}"
+  log-proto "${bootstep}" "${LOG_STATUS_STARTED}"
+  $command
+  log-proto "${bootstep}" "${LOG_STATUS_COMPLETED}"
+  log-trap-pop
+}
+
+# Logs a bootstrap step start. Prefer log-wrap.
+# Args:
+#   $1 : bootstrap step name.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-start {
+  local bootstep="$1"
+
+  log-trap-push "log-error ${bootstep}"
+  log-proto "${bootstep}" "${LOG_STATUS_STARTED}"
+}
+
+# Logs a bootstrap step end. Prefer log-wrap.
+# Args:
+#   $1 : bootstrap step name.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-end {
+  local bootstep="$1"
+
+  log-proto "${bootstep}" "${LOG_STATUS_COMPLETED}"
+  log-trap-pop
+}
+
+# Writes a log proto to stdout.
+# Args:
+#   $1: bootstrap step name.
+#   $2: status. Either 'STARTED', 'COMPLETED', or 'ERROR'.
+#   $3: optional status reason.
+#
+# NOTE: this function is duplicated in configure.sh, any changes here should be
+# duplicated there as well.
+function log-proto {
+  local bootstep="$1"
+  local status="$2"
+  local status_reason="${3:-}"
+
+  # Get current time.
+  local current_time
+  current_time="$(date --utc '+%s.%N')"
+  # ...formatted as UTC RFC 3339.
+  local timestamp
+  timestamp="$(date --utc --date="@${current_time}" '+%FT%T.%NZ')"
+
+  # Calculate latency.
+  local latency='null'
+  if [ "${status}" == "${LOG_STATUS_STARTED}" ]; then
+    LOG_START_TIMES["${bootstep}"]="${current_time}"
+  else
+    local start_time="${LOG_START_TIMES["${bootstep}"]}"
+    unset 'LOG_START_TIMES['"${bootstep}"']'
+
+    # Bash cannot do non-integer math, shell out to awk.
+    latency="$(echo "${current_time} ${start_time}" | awk '{print $1 - $2}')s"
+
+    # The default latency is null which cannot be wrapped as a string so we must
+    # do it here instead of the printf.
+    latency="\"${latency}\""
+  fi
+
+  printf '[cloud.kubernetes.monitoring.proto.SerialportLog] {"cluster_hash":"%s","vm_instance_name":"%s","boot_id":"%s","timestamp":"%s","bootstrap_status":{"step_name":"%s","status":"%s","status_reason":"%s","latency":%s}}\n' \
+  "${LOG_CLUSTER_ID}" "${LOG_INSTANCE_NAME}" "${LOG_BOOT_ID}" "${timestamp}" "${bootstep}" "${status}" "${status_reason}" "${latency}"
+}
+
 ########### Main Function ###########
 function main() {
   echo "Start to configure instance for kubernetes"
+  log-wrap 'DetectHostInfo' detect_host_info
 
   readonly UUID_MNT_PREFIX="/mnt/disks/by-uuid/google-local-ssds"
   readonly UUID_BLOCK_PREFIX="/dev/disk/by-uuid/google-local-ssds"
@@ -2995,17 +3270,12 @@ function main() {
   KUBE_CONTROLLER_MANAGER_CPU_REQUEST="${KUBE_CONTROLLER_MANAGER_CPU_REQUEST:-200m}"
   KUBE_SCHEDULER_CPU_REQUEST="${KUBE_SCHEDULER_CPU_REQUEST:-75m}"
 
-  # Use --retry-connrefused opt only if it's supported by curl.
-  CURL_RETRY_CONNREFUSED=""
-  if curl --help | grep -q -- '--retry-connrefused'; then
-    CURL_RETRY_CONNREFUSED='--retry-connrefused'
-  fi
-
   KUBE_HOME="/home/kubernetes"
   KUBE_BIN=${KUBE_HOME}/bin
   CONTAINERIZED_MOUNTER_HOME="${KUBE_HOME}/containerized_mounter"
   PV_RECYCLER_OVERRIDE_TEMPLATE="${KUBE_HOME}/kube-manifests/kubernetes/pv-recycler-template.yaml"
 
+  log-start 'SetPythonVersion'
   if [[ "$(python -V 2>&1)" =~ "Python 2" ]]; then
     # found python2, just use that
     PYTHON="python"
@@ -3021,13 +3291,15 @@ function main() {
     fi
   fi
   echo "Version :  $(${PYTHON} -V 2>&1)"
+  log-end 'SetPythonVersion'
 
+  log-start 'SourceKubeEnv'
   if [[ ! -e "${KUBE_HOME}/kube-env" ]]; then
     echo "The ${KUBE_HOME}/kube-env file does not exist!! Terminate cluster initialization."
     exit 1
   fi
-
   source "${KUBE_HOME}/kube-env"
+  log-end 'SourceKubeEnv'
 
   if [[ -f "${KUBE_HOME}/kubelet-config.yaml" ]]; then
     echo "Found Kubelet config file at ${KUBE_HOME}/kubelet-config.yaml"
@@ -3035,16 +3307,19 @@ function main() {
   fi
 
   if [[ -e "${KUBE_HOME}/kube-master-certs" ]]; then
-    source "${KUBE_HOME}/kube-master-certs"
+    log-wrap 'SourceKubeMasterCerts' source "${KUBE_HOME}/kube-master-certs"
   fi
 
+  log-start 'VerifyKubeUser'
   if [[ -n "${KUBE_USER:-}" ]]; then
     if ! [[ "${KUBE_USER}" =~ ^[-._@a-zA-Z0-9]+$ ]]; then
       echo "Bad KUBE_USER format."
       exit 1
     fi
   fi
+  log-end 'VerifyKubeUser'
 
+  log-start 'GenerateTokens'
   KUBE_CONTROLLER_MANAGER_TOKEN="$(secure_random 32)"
   KUBE_SCHEDULER_TOKEN="$(secure_random 32)"
   KUBE_CLUSTER_AUTOSCALER_TOKEN="$(secure_random 32)"
@@ -3061,35 +3336,36 @@ function main() {
   if [[ "${ENABLE_MONITORING_TOKEN:-false}" == "true" ]]; then
     MONITORING_TOKEN="$(secure_random 32)"
   fi
+  log-end 'GenerateTokens'
 
-  setup-os-params
-  config-ip-firewall
-  create-dirs
-  ensure-local-ssds
-  setup-kubelet-dir
-  setup-logrotate
+  log-wrap 'SetupOSParams' setup-os-params
+  log-wrap 'ConfigIPFirewall' config-ip-firewall
+  log-wrap 'CreateDirs' create-dirs
+  log-wrap 'EnsureLocalSSDs' ensure-local-ssds
+  log-wrap 'SetupKubeletDir' setup-kubelet-dir
+  log-wrap 'SetupLogrotate' setup-logrotate
   if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
-    mount-master-pd
-    create-node-pki
-    create-master-pki
-    create-master-auth
-    ensure-master-bootstrap-kubectl-auth
-    create-master-kubelet-auth
-    create-master-etcd-auth
-    create-master-etcd-apiserver-auth
-    override-pv-recycler
-    gke-master-start
+    log-wrap 'MountMasterPD' mount-master-pd
+    log-wrap 'CreateNodePKI' create-node-pki
+    log-wrap 'CreateMasterPKI' create-master-pki
+    log-wrap 'CreateMasterAuth' create-master-auth
+    log-wrap 'EnsureMasterBootstrapKubectlAuth' ensure-master-bootstrap-kubectl-auth
+    log-wrap 'CreateMasterKubeletAuth' create-master-kubelet-auth
+    log-wrap 'CreateMasterEtcdAuth' create-master-etcd-auth
+    log-wrap 'CreateMasterEtcdApiserverAuth' create-master-etcd-apiserver-auth
+    log-wrap 'OverridePVRecycler' override-pv-recycler
+    log-wrap 'GKEMasterStart' gke-master-start
   else
-    create-node-pki
-    create-kubelet-kubeconfig "${KUBERNETES_MASTER_NAME}"
+    log-wrap 'CreateNodePKI' create-node-pki
+    log-wrap 'CreateKubeletKubeconfig' create-kubelet-kubeconfig "${KUBERNETES_MASTER_NAME}"
     if [[ "${KUBE_PROXY_DAEMONSET:-}" != "true" ]] && [[ "${KUBE_PROXY_DISABLE:-}" != "true" ]]; then
-      create-kubeproxy-user-kubeconfig
+      log-wrap 'CreateKubeproxyUserKubeconfig' create-kubeproxy-user-kubeconfig
     fi
     if [[ "${ENABLE_NODE_PROBLEM_DETECTOR:-}" == "standalone" ]]; then
       if [[ -n "${NODE_PROBLEM_DETECTOR_TOKEN:-}" ]]; then
-        create-node-problem-detector-kubeconfig "${KUBERNETES_MASTER_NAME}"
+        log-wrap 'CreateNodeProblemDetectorKubeconfig' create-node-problem-detector-kubeconfig "${KUBERNETES_MASTER_NAME}"
       elif [[ -f "/var/lib/kubelet/kubeconfig" ]]; then
-        create-node-problem-detector-kubeconfig-from-kubelet
+        log-wrap 'CreateNodeProblemDetectorKubeconfigFromKubelet' create-node-problem-detector-kubeconfig-from-kubelet
       else
         echo "Either NODE_PROBLEM_DETECTOR_TOKEN or /var/lib/kubelet/kubeconfig must be set"
         exit 1
@@ -3097,56 +3373,71 @@ function main() {
     fi
   fi
 
-  override-kubectl
+  log-wrap 'OverrideKubectl' override-kubectl
   container_runtime="${CONTAINER_RUNTIME:-docker}"
   # Run the containerized mounter once to pre-cache the container image.
   if [[ "${container_runtime}" == "docker" ]]; then
-    assemble-docker-flags
+    log-wrap 'AssembleDockerFlags' assemble-docker-flags
   elif [[ "${container_runtime}" == "containerd" ]]; then
-    # stop docker if it is present as we want to use just containerd
-    systemctl stop docker || echo "unable to stop docker"
-    setup-containerd
+    if docker-installed; then
+      # We still need to configure docker so it wouldn't reserver the 172.17.0/16 subnet
+      # And if somebody will start docker to build or pull something, logging will also be set up
+      log-wrap 'AssembleDockerFlags' assemble-docker-flags
+      # stop docker if it is present as we want to use just containerd
+      log-wrap 'StopDocker' systemctl stop docker || echo "unable to stop docker"
+    fi
+    log-wrap 'SetupContainerd' setup-containerd
   fi
 
+  log-start 'SetupKubePodLogReadersGroupDir'
   if [[ -n "${KUBE_POD_LOG_READERS_GROUP:-}" ]]; then
      mkdir -p /var/log/pods/
      chgrp -R "${KUBE_POD_LOG_READERS_GROUP:-}" /var/log/pods/
      chmod -R g+s /var/log/pods/
   fi
+  log-end 'SetupKubePodLogReadersGroupDir'
 
-  start-kubelet
+  log-wrap 'StartKubelet' start-kubelet
 
   if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
-    compute-master-manifest-variables
+    log-wrap 'ComputeMasterManifestVariables' compute-master-manifest-variables
     if [[ -z "${ETCD_SERVERS:-}" ]]; then
-      start-etcd-servers
+      log-wrap 'StartEtcdServers' start-etcd-servers
     fi
-    source ${KUBE_BIN}/configure-kubeapiserver.sh
-    start-kube-apiserver
+    log-wrap 'SourceConfigureKubeApiserver' source ${KUBE_BIN}/configure-kubeapiserver.sh
+    log-wrap 'StartKubeApiserver' start-kube-apiserver
     if [[ "${RUN_KONNECTIVITY_PODS:-false}" == "true" ]]; then
-      start-konnectivity-server
+      log-wrap 'StartKonnectivityServer' start-konnectivity-server
     fi
-    start-kube-controller-manager
-    start-kube-scheduler
-    wait-till-apiserver-ready
-    start-kube-addons
-    start-cluster-autoscaler
-    start-lb-controller
-    update-legacy-addon-node-labels &
+    log-wrap 'StartKubeControllerManager' start-kube-controller-manager
+    log-wrap 'StartKubeScheduler' start-kube-scheduler
+    log-wrap 'WaitTillApiserverReady' wait-till-apiserver-ready
+    log-wrap 'StartKubeAddons' start-kube-addons
+    log-wrap 'StartClusterAutoscaler' start-cluster-autoscaler
+    log-wrap 'StartLBController' start-lb-controller
+    log-wrap 'UpdateLegacyAddonNodeLabels' update-legacy-addon-node-labels &
   else
     if [[ "${KUBE_PROXY_DAEMONSET:-}" != "true" ]] && [[ "${KUBE_PROXY_DISABLE:-}" != "true" ]]; then
-      start-kube-proxy
+      log-wrap 'StartKubeProxy' start-kube-proxy
     fi
     if [[ "${ENABLE_NODE_PROBLEM_DETECTOR:-}" == "standalone" ]]; then
-      start-node-problem-detector
+      log-wrap 'StartNodeProblemDetector' start-node-problem-detector
     fi
   fi
-  reset-motd
-  prepare-mounter-rootfs
-  modprobe configs
+  log-wrap 'ResetMotd' reset-motd
+  log-wrap 'PrepareMounterRootfs' prepare-mounter-rootfs
+
+  # Wait for all background jobs to finish.
+  wait
   echo "Done for the configuration for kubernetes"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  main "${@}"
+  log-init
+  log-wrap 'ConfigureHelperMain' main "${@}"
+
+  if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
+    # Give kube-bootstrap-logs-forwarder.service some time to write all logs.
+    sleep 3
+  fi
 fi

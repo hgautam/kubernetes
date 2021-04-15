@@ -71,7 +71,7 @@ var (
 		## via your distribution's package manager.
 		## Load the kubectl completion code for bash into the current shell
 		    source <(kubectl completion bash)
-		## Write bash completion code to a file and source if from .bash_profile
+		## Write bash completion code to a file and source it from .bash_profile
 		    kubectl completion bash > ~/.kube/completion.bash.inc
 		    printf "
 		      # Kubectl shell completion
@@ -106,8 +106,7 @@ func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 		Long:                  completionLong,
 		Example:               completionExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunCompletion(out, boilerPlate, cmd, args)
-			cmdutil.CheckErr(err)
+			cmdutil.CheckErr(RunCompletion(out, boilerPlate, cmd, args))
 		},
 		ValidArgs: shells,
 	}

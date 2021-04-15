@@ -47,7 +47,7 @@ func (la *LeastAllocated) Name() string {
 func (la *LeastAllocated) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
 	nodeInfo, err := la.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
 	if err != nil {
-		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q from Snapshot: %v", nodeName, err))
+		return 0, framework.AsStatus(fmt.Errorf("getting node %q from Snapshot: %w", nodeName, err))
 	}
 
 	// la.score favors nodes with fewer requested resources.
@@ -70,8 +70,7 @@ func NewLeastAllocated(laArgs runtime.Object, h framework.Handle) (framework.Plu
 	if !ok {
 		return nil, fmt.Errorf("want args to be of type NodeResourcesLeastAllocatedArgs, got %T", laArgs)
 	}
-
-	if err := validation.ValidateNodeResourcesLeastAllocatedArgs(args); err != nil {
+	if err := validation.ValidateNodeResourcesLeastAllocatedArgs(nil, args); err != nil {
 		return nil, err
 	}
 

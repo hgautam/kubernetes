@@ -24,7 +24,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -92,7 +92,7 @@ type BindPlugin struct {
 	numBindCalled         int
 	PluginName            string
 	bindStatus            *framework.Status
-	client                *clientset.Clientset
+	client                clientset.Interface
 	pluginInvokeEventChan chan pluginInvokeEvent
 }
 
@@ -409,15 +409,14 @@ func (pp *PostFilterPlugin) PostFilter(ctx context.Context, state *framework.Cyc
 		return nil, framework.NewStatus(framework.Error, err.Error())
 	}
 
-	ph := pp.fh.PreemptHandle()
 	for _, nodeInfo := range nodeInfos {
-		ph.RunFilterPlugins(ctx, state, pod, nodeInfo)
+		pp.fh.RunFilterPlugins(ctx, state, pod, nodeInfo)
 	}
 	var nodes []*v1.Node
 	for _, nodeInfo := range nodeInfos {
 		nodes = append(nodes, nodeInfo.Node())
 	}
-	ph.RunScorePlugins(ctx, state, pod, nodes)
+	pp.fh.RunScorePlugins(ctx, state, pod, nodes)
 
 	if pp.failPostFilter {
 		return nil, framework.NewStatus(framework.Error, fmt.Sprintf("injecting failure for pod %v", pod.Name))
@@ -459,7 +458,7 @@ func (pp *PermitPlugin) Permit(ctx context.Context, state *framework.CycleState,
 		if pp.waitAndRejectPermit {
 			pp.rejectingPod = pod.Name
 			pp.fh.IterateOverWaitingPods(func(wp framework.WaitingPod) {
-				wp.Reject(fmt.Sprintf("reject pod %v", wp.GetPod().Name))
+				wp.Reject(pp.name, fmt.Sprintf("reject pod %v", wp.GetPod().Name))
 			})
 			return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("reject pod %v", pod.Name)), 0
 		}
@@ -479,7 +478,7 @@ func (pp *PermitPlugin) allowAllPods() {
 
 // rejectAllPods rejects all waiting pods.
 func (pp *PermitPlugin) rejectAllPods() {
-	pp.fh.IterateOverWaitingPods(func(wp framework.WaitingPod) { wp.Reject("rejectAllPods") })
+	pp.fh.IterateOverWaitingPods(func(wp framework.WaitingPod) { wp.Reject(pp.name, "rejectAllPods") })
 }
 
 // reset used to reset permit plugin.
@@ -514,7 +513,7 @@ func TestPreFilterPlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			PreFilter: &schedulerconfig.PluginSet{
+			PreFilter: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{Name: prefilterPluginName},
 				},
@@ -657,12 +656,12 @@ func TestPostFilterPlugin(t *testing.T) {
 			prof := schedulerconfig.KubeSchedulerProfile{
 				SchedulerName: v1.DefaultSchedulerName,
 				Plugins: &schedulerconfig.Plugins{
-					Filter: &schedulerconfig.PluginSet{
+					Filter: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{Name: filterPluginName},
 						},
 					},
-					Score: &schedulerconfig.PluginSet{
+					Score: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{Name: scorePluginName},
 						},
@@ -672,7 +671,7 @@ func TestPostFilterPlugin(t *testing.T) {
 							{Name: "*"},
 						},
 					},
-					PostFilter: &schedulerconfig.PluginSet{
+					PostFilter: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{Name: postfilterPluginName},
 						},
@@ -744,7 +743,7 @@ func TestScorePlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			Score: &schedulerconfig.PluginSet{
+			Score: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{Name: scorePluginName},
 				},
@@ -820,7 +819,7 @@ func TestNormalizeScorePlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			Score: &schedulerconfig.PluginSet{
+			Score: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{Name: scoreWithNormalizePluginName},
 				},
@@ -864,7 +863,7 @@ func TestReservePluginReserve(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			Reserve: &schedulerconfig.PluginSet{
+			Reserve: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{
 						Name: reservePluginName,
@@ -935,7 +934,7 @@ func TestPrebindPlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			PreBind: &schedulerconfig.PluginSet{
+			PreBind: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{
 						Name: preBindPluginName,
@@ -1061,10 +1060,10 @@ func TestReservePluginUnreserve(t *testing.T) {
 			prof := schedulerconfig.KubeSchedulerProfile{
 				SchedulerName: v1.DefaultSchedulerName,
 				Plugins: &schedulerconfig.Plugins{
-					Reserve: &schedulerconfig.PluginSet{
+					Reserve: schedulerconfig.PluginSet{
 						// filled by looping over reservePlugins
 					},
-					PreBind: &schedulerconfig.PluginSet{
+					PreBind: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{
 								Name: preBindPluginName,
@@ -1159,15 +1158,15 @@ func TestBindPlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			Reserve: &schedulerconfig.PluginSet{
+			Reserve: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{{Name: reservePlugin.Name()}},
 			},
-			Bind: &schedulerconfig.PluginSet{
+			Bind: schedulerconfig.PluginSet{
 				// Put DefaultBinder last.
 				Enabled:  []schedulerconfig.Plugin{{Name: bindPlugin1.Name()}, {Name: bindPlugin2.Name()}, {Name: defaultbinder.Name}},
 				Disabled: []schedulerconfig.Plugin{{Name: defaultbinder.Name}},
 			},
-			PostBind: &schedulerconfig.PluginSet{
+			PostBind: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{{Name: postBindPlugin.Name()}},
 			},
 		},
@@ -1345,14 +1344,14 @@ func TestPostBindPlugin(t *testing.T) {
 			prof := schedulerconfig.KubeSchedulerProfile{
 				SchedulerName: v1.DefaultSchedulerName,
 				Plugins: &schedulerconfig.Plugins{
-					PreBind: &schedulerconfig.PluginSet{
+					PreBind: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{
 								Name: preBindPluginName,
 							},
 						},
 					},
-					PostBind: &schedulerconfig.PluginSet{
+					PostBind: schedulerconfig.PluginSet{
 						Enabled: []schedulerconfig.Plugin{
 							{
 								Name: postBindPluginName,
@@ -1691,7 +1690,7 @@ func TestFilterPlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			Filter: &schedulerconfig.PluginSet{
+			Filter: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{
 						Name: filterPluginName,
@@ -1763,7 +1762,7 @@ func TestPreScorePlugin(t *testing.T) {
 	prof := schedulerconfig.KubeSchedulerProfile{
 		SchedulerName: v1.DefaultSchedulerName,
 		Plugins: &schedulerconfig.Plugins{
-			PreScore: &schedulerconfig.PluginSet{
+			PreScore: schedulerconfig.PluginSet{
 				Enabled: []schedulerconfig.Plugin{
 					{
 						Name: preScorePluginName,
@@ -1851,14 +1850,29 @@ func TestPreemptWithPermitPlugin(t *testing.T) {
 	permitPlugin.timeoutPermit = false
 	permitPlugin.waitAndRejectPermit = false
 	permitPlugin.waitAndAllowPermit = true
+	permitPlugin.waitingPod = "waiting-pod"
 
 	lowPriority, highPriority := int32(100), int32(300)
 	resourceRequest := v1.ResourceRequirements{Requests: v1.ResourceList{
+		v1.ResourceCPU:    *resource.NewMilliQuantity(200, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(200, resource.DecimalSI)},
+	}
+	preemptorResourceRequest := v1.ResourceRequirements{Requests: v1.ResourceList{
 		v1.ResourceCPU:    *resource.NewMilliQuantity(400, resource.DecimalSI),
 		v1.ResourceMemory: *resource.NewQuantity(400, resource.DecimalSI)},
 	}
 
-	// First pod will go waiting.
+	// First pod will go running.
+	runningPod := initPausePod(&pausePodConfig{Name: "running-pod", Namespace: testCtx.NS.Name, Priority: &lowPriority, Resources: &resourceRequest})
+	runningPod.Spec.TerminationGracePeriodSeconds = new(int64)
+	runningPod, err = createPausePod(testCtx.ClientSet, runningPod)
+	if err != nil {
+		t.Errorf("Error while creating the waiting pod: %v", err)
+	}
+	// Wait until the pod scheduled, then create a preemptor pod to preempt it.
+	wait.Poll(100*time.Millisecond, 30*time.Second, podScheduled(testCtx.ClientSet, runningPod.Name, runningPod.Namespace))
+
+	// Second pod will go waiting.
 	waitingPod := initPausePod(&pausePodConfig{Name: "waiting-pod", Namespace: testCtx.NS.Name, Priority: &lowPriority, Resources: &resourceRequest})
 	waitingPod.Spec.TerminationGracePeriodSeconds = new(int64)
 	waitingPod, err = createPausePod(testCtx.ClientSet, waitingPod)
@@ -1872,9 +1886,9 @@ func TestPreemptWithPermitPlugin(t *testing.T) {
 		return w, nil
 	})
 
-	// Create second pod which should preempt first pod.
+	// Create third pod which should preempt other pods.
 	preemptorPod, err := createPausePod(testCtx.ClientSet,
-		initPausePod(&pausePodConfig{Name: "preemptor-pod", Namespace: testCtx.NS.Name, Priority: &highPriority, Resources: &resourceRequest}))
+		initPausePod(&pausePodConfig{Name: "preemptor-pod", Namespace: testCtx.NS.Name, Priority: &highPriority, Resources: &preemptorResourceRequest}))
 	if err != nil {
 		t.Errorf("Error while creating the preemptor pod: %v", err)
 	}
@@ -1886,18 +1900,30 @@ func TestPreemptWithPermitPlugin(t *testing.T) {
 	// }
 
 	if err := wait.Poll(200*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
-		_, err := getPod(testCtx.ClientSet, waitingPod.Name, waitingPod.Namespace)
-		return apierrors.IsNotFound(err), nil
+		w := false
+		permitPlugin.fh.IterateOverWaitingPods(func(wp framework.WaitingPod) { w = true })
+		return !w, nil
 	}); err != nil {
-		t.Error("Expected the waiting pod to get preempted and deleted")
+		t.Error("Expected the waiting pod to get preempted")
 	}
-
+	// Expect the waitingPod to be still present.
+	if _, err := getPod(testCtx.ClientSet, waitingPod.Name, waitingPod.Namespace); err != nil {
+		t.Error("Get waiting pod in waiting pod failed.")
+	}
+	// Expect the runningPod to be deleted physically.
+	_, err = getPod(testCtx.ClientSet, runningPod.Name, runningPod.Namespace)
+	if err != nil && !errors.IsNotFound(err) {
+		t.Error("Get running pod failed.")
+	}
+	if err == nil {
+		t.Error("Running pod still exist.")
+	}
 	if permitPlugin.numPermitCalled == 0 {
 		t.Errorf("Expected the permit plugin to be called.")
 	}
 
 	permitPlugin.reset()
-	testutils.CleanupPods(testCtx.ClientSet, t, []*v1.Pod{waitingPod, preemptorPod})
+	testutils.CleanupPods(testCtx.ClientSet, t, []*v1.Pod{waitingPod, runningPod, preemptorPod})
 }
 
 func initTestSchedulerForFrameworkTest(t *testing.T, testCtx *testutils.TestContext, nodeCount int, opts ...scheduler.Option) *testutils.TestContext {
@@ -1929,7 +1955,7 @@ func initRegistryAndConfig(pp ...*PermitPlugin) (registry frameworkruntime.Regis
 
 	prof.SchedulerName = v1.DefaultSchedulerName
 	prof.Plugins = &schedulerconfig.Plugins{
-		Permit: &schedulerconfig.PluginSet{
+		Permit: schedulerconfig.PluginSet{
 			Enabled: plugins,
 		},
 	}

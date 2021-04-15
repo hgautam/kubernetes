@@ -28,14 +28,23 @@ import (
 type NodeName struct{}
 
 var _ framework.FilterPlugin = &NodeName{}
+var _ framework.EnqueueExtensions = &NodeName{}
 
 const (
 	// Name is the name of the plugin used in the plugin registry and configurations.
 	Name = "NodeName"
 
 	// ErrReason returned when node name doesn't match.
-	ErrReason = "node(s) didn't match the requested hostname"
+	ErrReason = "node(s) didn't match the requested node name"
 )
+
+// EventsToRegister returns the possible events that may make a Pod
+// failed by this plugin schedulable.
+func (pl *NodeName) EventsToRegister() []framework.ClusterEvent {
+	return []framework.ClusterEvent{
+		{Resource: framework.Node, ActionType: framework.Add},
+	}
+}
 
 // Name returns name of the plugin. It is used in logs, etc.
 func (pl *NodeName) Name() string {

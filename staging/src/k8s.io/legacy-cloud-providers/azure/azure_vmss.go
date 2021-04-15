@@ -74,7 +74,8 @@ type scaleSet struct {
 	*Cloud
 
 	// availabilitySet is also required for scaleSet because some instances
-	// (e.g. master nodes) may not belong to any scale sets.
+	// (e.g. control plane nodes) may not belong to any scale sets.
+	// this also allows for clusters with both VM and VMSS nodes.
 	availabilitySet VMSet
 
 	vmssCache                 *azcache.TimedCache
@@ -740,7 +741,7 @@ func (ss *scaleSet) getAgentPoolScaleSets(nodes []*v1.Node) (*[]string, error) {
 // (depending vmType configured) for service load balancer. If the service has
 // no loadbalancer mode annotation returns the primary VMSet. If service annotation
 // for loadbalancer exists then return the eligible VMSet.
-func (ss *scaleSet) GetVMSetNames(service *v1.Service, nodes []*v1.Node) (vmSetNames *[]string, err error) {
+func (ss *scaleSet) GetVMSetNames(service *v1.Service, nodes []*v1.Node) (*[]string, error) {
 	hasMode, isAuto, serviceVMSetNames := getServiceLoadBalancerMode(service)
 	useSingleSLB := ss.useStandardLoadBalancer() && !ss.EnableMultipleStandardLoadBalancers
 	if !hasMode || useSingleSLB {
@@ -764,7 +765,7 @@ func (ss *scaleSet) GetVMSetNames(service *v1.Service, nodes []*v1.Node) (vmSetN
 	sort.Strings(*scaleSetNames)
 
 	if !isAuto {
-		if serviceVMSetNames == nil || len(serviceVMSetNames) == 0 {
+		if len(serviceVMSetNames) == 0 {
 			return nil, fmt.Errorf("service annotation for LoadBalancerMode is empty, it should have __auto__ or availability sets value")
 		}
 		// validate scale set exists
@@ -782,10 +783,10 @@ func (ss *scaleSet) GetVMSetNames(service *v1.Service, nodes []*v1.Node) (vmSetN
 				return nil, fmt.Errorf("scale set (%s) - not found", serviceVMSetNames[sasx])
 			}
 		}
-		vmSetNames = &serviceVMSetNames
+		scaleSetNames = &serviceVMSetNames
 	}
 
-	return vmSetNames, nil
+	return scaleSetNames, nil
 }
 
 // extractResourceGroupByVMSSNicID extracts the resource group name by vmss nicID.

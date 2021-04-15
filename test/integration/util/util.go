@@ -42,6 +42,7 @@ import (
 	"k8s.io/klog/v2"
 	pvutil "k8s.io/kubernetes/pkg/controller/volume/persistentvolume/util"
 	"k8s.io/kubernetes/pkg/scheduler"
+	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config/scheme"
 	schedulerapiv1 "k8s.io/kubernetes/pkg/scheduler/apis/config/v1"
@@ -61,7 +62,7 @@ func StartApiserver() (string, ShutdownFunc) {
 		h.M.GenericAPIServer.Handler.ServeHTTP(w, req)
 	}))
 
-	_, _, closeFn := framework.RunAMasterUsingServer(framework.NewIntegrationTestMasterConfig(), s, h)
+	_, _, closeFn := framework.RunAnApiserverUsingServer(framework.NewIntegrationTestMasterConfig(), s, h)
 
 	shutdownFunc := func() {
 		klog.Infof("destroying API server")
@@ -74,7 +75,7 @@ func StartApiserver() (string, ShutdownFunc) {
 
 // StartScheduler configures and starts a scheduler given a handle to the clientSet interface
 // and event broadcaster. It returns the running scheduler, podInformer and the shutdown function to stop it.
-func StartScheduler(clientSet clientset.Interface) (*scheduler.Scheduler, coreinformers.PodInformer, ShutdownFunc) {
+func StartScheduler(clientSet clientset.Interface, kubeConfig *restclient.Config, cfg *kubeschedulerconfig.KubeSchedulerConfiguration) (*scheduler.Scheduler, coreinformers.PodInformer, ShutdownFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	informerFactory := scheduler.NewInformerFactory(clientSet, 0)
@@ -87,7 +88,15 @@ func StartScheduler(clientSet clientset.Interface) (*scheduler.Scheduler, corein
 		clientSet,
 		informerFactory,
 		profile.NewRecorderFactory(evtBroadcaster),
-		ctx.Done())
+		ctx.Done(),
+		scheduler.WithKubeConfig(kubeConfig),
+		scheduler.WithProfiles(cfg.Profiles...),
+		scheduler.WithAlgorithmSource(cfg.AlgorithmSource),
+		scheduler.WithPercentageOfNodesToScore(cfg.PercentageOfNodesToScore),
+		scheduler.WithPodMaxBackoffSeconds(cfg.PodMaxBackoffSeconds),
+		scheduler.WithPodInitialBackoffSeconds(cfg.PodInitialBackoffSeconds),
+		scheduler.WithExtenders(cfg.Extenders...),
+		scheduler.WithParallelism(cfg.Parallelism))
 	if err != nil {
 		klog.Fatalf("Error creating scheduler: %v", err)
 	}
@@ -151,7 +160,8 @@ type TestContext struct {
 	CloseFn         framework.CloseFunc
 	HTTPServer      *httptest.Server
 	NS              *v1.Namespace
-	ClientSet       *clientset.Clientset
+	ClientSet       clientset.Interface
+	KubeConfig      *restclient.Config
 	InformerFactory informers.SharedInformerFactory
 	Scheduler       *scheduler.Scheduler
 	Ctx             context.Context
@@ -332,7 +342,7 @@ func InitTestMaster(t *testing.T, nsPrefix string, admission admission.Interface
 		masterConfig.GenericConfig.AdmissionControl = admission
 	}
 
-	_, testCtx.HTTPServer, testCtx.CloseFn = framework.RunAMasterUsingServer(masterConfig, s, h)
+	_, testCtx.HTTPServer, testCtx.CloseFn = framework.RunAnApiserverUsingServer(masterConfig, s, h)
 
 	if nsPrefix != "default" {
 		testCtx.NS = framework.CreateTestingNamespace(nsPrefix+string(uuid.NewUUID()), s, t)
@@ -341,14 +351,14 @@ func InitTestMaster(t *testing.T, nsPrefix string, admission admission.Interface
 	}
 
 	// 2. Create kubeclient
-	testCtx.ClientSet = clientset.NewForConfigOrDie(
-		&restclient.Config{
-			QPS: -1, Host: s.URL,
-			ContentConfig: restclient.ContentConfig{
-				GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"},
-			},
+	kubeConfig := &restclient.Config{
+		QPS: -1, Host: s.URL,
+		ContentConfig: restclient.ContentConfig{
+			GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"},
 		},
-	)
+	}
+	testCtx.KubeConfig = kubeConfig
+	testCtx.ClientSet = clientset.NewForConfigOrDie(kubeConfig)
 	return &testCtx
 }
 
@@ -395,6 +405,7 @@ func InitTestSchedulerWithOptions(
 	if policy != nil {
 		opts = append(opts, scheduler.WithAlgorithmSource(CreateAlgorithmSourceFromPolicy(policy, testCtx.ClientSet)))
 	}
+	opts = append(opts, scheduler.WithKubeConfig(testCtx.KubeConfig))
 	testCtx.Scheduler, err = scheduler.New(
 		testCtx.ClientSet,
 		testCtx.InformerFactory,

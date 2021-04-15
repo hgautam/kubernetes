@@ -394,32 +394,34 @@ func TestDump(t *testing.T) {
 		podsToAdd:    []*v1.Pod{testPods[0]},
 	}}
 
-	for _, tt := range tests {
-		cache := newSchedulerCache(ttl, time.Second, nil)
-		for _, podToAssume := range tt.podsToAssume {
-			if err := assumeAndFinishBinding(cache, podToAssume, now); err != nil {
-				t.Errorf("assumePod failed: %v", err)
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
+			cache := newSchedulerCache(ttl, time.Second, nil)
+			for _, podToAssume := range tt.podsToAssume {
+				if err := assumeAndFinishBinding(cache, podToAssume, now); err != nil {
+					t.Errorf("assumePod failed: %v", err)
+				}
 			}
-		}
-		for _, podToAdd := range tt.podsToAdd {
-			if err := cache.AddPod(podToAdd); err != nil {
-				t.Errorf("AddPod failed: %v", err)
+			for _, podToAdd := range tt.podsToAdd {
+				if err := cache.AddPod(podToAdd); err != nil {
+					t.Errorf("AddPod failed: %v", err)
+				}
 			}
-		}
 
-		snapshot := cache.Dump()
-		if len(snapshot.Nodes) != len(cache.nodes) {
-			t.Errorf("Unequal number of nodes in the cache and its snapshot. expected: %v, got: %v", len(cache.nodes), len(snapshot.Nodes))
-		}
-		for name, ni := range snapshot.Nodes {
-			nItem := cache.nodes[name]
-			if !reflect.DeepEqual(ni, nItem.info) {
-				t.Errorf("expect \n%+v; got \n%+v", nItem.info, ni)
+			snapshot := cache.Dump()
+			if len(snapshot.Nodes) != len(cache.nodes) {
+				t.Errorf("Unequal number of nodes in the cache and its snapshot. expected: %v, got: %v", len(cache.nodes), len(snapshot.Nodes))
 			}
-		}
-		if !reflect.DeepEqual(snapshot.AssumedPods, cache.assumedPods) {
-			t.Errorf("expect \n%+v; got \n%+v", cache.assumedPods, snapshot.AssumedPods)
-		}
+			for name, ni := range snapshot.Nodes {
+				nItem := cache.nodes[name]
+				if !reflect.DeepEqual(ni, nItem.info) {
+					t.Errorf("expect \n%+v; got \n%+v", nItem.info, ni)
+				}
+			}
+			if !reflect.DeepEqual(snapshot.AssumedPods, cache.assumedPods) {
+				t.Errorf("expect \n%+v; got \n%+v", cache.assumedPods, snapshot.AssumedPods)
+			}
+		})
 	}
 }
 
@@ -647,26 +649,28 @@ func TestUpdatePodAndGet(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		cache := newSchedulerCache(ttl, time.Second, nil)
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
+			cache := newSchedulerCache(ttl, time.Second, nil)
 
-		if err := tt.handler(cache, tt.pod); err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-
-		if !tt.assumePod {
-			if err := cache.UpdatePod(tt.pod, tt.podToUpdate); err != nil {
-				t.Fatalf("UpdatePod failed: %v", err)
+			if err := tt.handler(cache, tt.pod); err != nil {
+				t.Fatalf("unexpected err: %v", err)
 			}
-		}
 
-		cachedPod, err := cache.GetPod(tt.pod)
-		if err != nil {
-			t.Fatalf("GetPod failed: %v", err)
-		}
-		if !reflect.DeepEqual(tt.podToUpdate, cachedPod) {
-			t.Fatalf("pod get=%s, want=%s", cachedPod, tt.podToUpdate)
-		}
+			if !tt.assumePod {
+				if err := cache.UpdatePod(tt.pod, tt.podToUpdate); err != nil {
+					t.Fatalf("UpdatePod failed: %v", err)
+				}
+			}
+
+			cachedPod, err := cache.GetPod(tt.pod)
+			if err != nil {
+				t.Fatalf("GetPod failed: %v", err)
+			}
+			if !reflect.DeepEqual(tt.podToUpdate, cachedPod) {
+				t.Fatalf("pod get=%s, want=%s", cachedPod, tt.podToUpdate)
+			}
+		})
 	}
 }
 
@@ -865,9 +869,7 @@ func TestRemovePod(t *testing.T) {
 				t.Error(err)
 			}
 			for _, n := range tt.nodes {
-				if err := cache.AddNode(n); err != nil {
-					t.Error(err)
-				}
+				cache.AddNode(n)
 			}
 
 			if err := cache.RemovePod(tt.pod); err != nil {
@@ -1076,9 +1078,7 @@ func TestNodeOperators(t *testing.T) {
 			node := test.node
 
 			cache := newSchedulerCache(time.Second, time.Second, nil)
-			if err := cache.AddNode(node); err != nil {
-				t.Fatal(err)
-			}
+			cache.AddNode(node)
 			for _, pod := range test.pods {
 				if err := cache.AddPod(pod); err != nil {
 					t.Fatal(err)
@@ -1122,9 +1122,7 @@ func TestNodeOperators(t *testing.T) {
 			node.Status.Allocatable[v1.ResourceMemory] = mem50m
 			expected.Allocatable.Memory = mem50m.Value()
 
-			if err := cache.UpdateNode(nil, node); err != nil {
-				t.Error(err)
-			}
+			cache.UpdateNode(nil, node)
 			got, found = cache.nodes[node.Name]
 			if !found {
 				t.Errorf("Failed to find node %v in schedulertypes after UpdateNode.", node.Name)
@@ -1261,9 +1259,7 @@ func TestSchedulerCache_UpdateSnapshot(t *testing.T) {
 
 	addNode := func(i int) operation {
 		return func(t *testing.T) {
-			if err := cache.AddNode(nodes[i]); err != nil {
-				t.Error(err)
-			}
+			cache.AddNode(nodes[i])
 		}
 	}
 	removeNode := func(i int) operation {
@@ -1275,9 +1271,7 @@ func TestSchedulerCache_UpdateSnapshot(t *testing.T) {
 	}
 	updateNode := func(i int) operation {
 		return func(t *testing.T) {
-			if err := cache.UpdateNode(nodes[i], updatedNodes[i]); err != nil {
-				t.Error(err)
-			}
+			cache.UpdateNode(nodes[i], updatedNodes[i])
 		}
 	}
 	addPod := func(i int) operation {
@@ -1585,9 +1579,7 @@ func TestSchedulerCache_updateNodeInfoSnapshotList(t *testing.T) {
 	var snapshot *Snapshot
 
 	addNode := func(t *testing.T, i int) {
-		if err := cache.AddNode(nodes[i]); err != nil {
-			t.Error(err)
-		}
+		cache.AddNode(nodes[i])
 		_, ok := snapshot.nodeInfoMap[nodes[i].Name]
 		if !ok {
 			snapshot.nodeInfoMap[nodes[i].Name] = cache.nodes[nodes[i].Name].info

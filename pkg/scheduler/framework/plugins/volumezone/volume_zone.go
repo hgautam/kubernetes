@@ -27,8 +27,8 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	storagelisters "k8s.io/client-go/listers/storage/v1"
 	volumehelpers "k8s.io/cloud-provider/volume/helpers"
+	storagehelpers "k8s.io/component-helpers/storage/volume"
 	"k8s.io/klog/v2"
-	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
@@ -40,6 +40,7 @@ type VolumeZone struct {
 }
 
 var _ framework.FilterPlugin = &VolumeZone{}
+var _ framework.EnqueueExtensions = &VolumeZone{}
 
 const (
 	// Name is the name of the plugin used in the plugin registry and configurations.
@@ -112,7 +113,7 @@ func (pl *VolumeZone) Filter(ctx context.Context, _ *framework.CycleState, pod *
 		}
 		pvc, err := pl.pvcLister.PersistentVolumeClaims(pod.Namespace).Get(pvcName)
 		if err != nil {
-			return framework.NewStatus(framework.Error, err.Error())
+			return framework.AsStatus(err)
 		}
 
 		if pvc == nil {
@@ -121,9 +122,9 @@ func (pl *VolumeZone) Filter(ctx context.Context, _ *framework.CycleState, pod *
 
 		pvName := pvc.Spec.VolumeName
 		if pvName == "" {
-			scName := v1helper.GetPersistentVolumeClaimClass(pvc)
+			scName := storagehelpers.GetPersistentVolumeClaimClass(pvc)
 			if len(scName) == 0 {
-				return framework.NewStatus(framework.Error, fmt.Sprint("PersistentVolumeClaim had no pv name and storageClass name"))
+				return framework.NewStatus(framework.Error, "PersistentVolumeClaim had no pv name and storageClass name")
 			}
 
 			class, _ := pl.scLister.Get(scName)
@@ -139,12 +140,12 @@ func (pl *VolumeZone) Filter(ctx context.Context, _ *framework.CycleState, pod *
 				continue
 			}
 
-			return framework.NewStatus(framework.Error, fmt.Sprint("PersistentVolume had no name"))
+			return framework.NewStatus(framework.Error, "PersistentVolume had no name")
 		}
 
 		pv, err := pl.pvLister.Get(pvName)
 		if err != nil {
-			return framework.NewStatus(framework.Error, err.Error())
+			return framework.AsStatus(err)
 		}
 
 		if pv == nil {
@@ -155,10 +156,10 @@ func (pl *VolumeZone) Filter(ctx context.Context, _ *framework.CycleState, pod *
 			if !volumeZoneLabels.Has(k) {
 				continue
 			}
-			nodeV, _ := nodeConstraints[k]
+			nodeV := nodeConstraints[k]
 			volumeVSet, err := volumehelpers.LabelZonesToSet(v)
 			if err != nil {
-				klog.Warningf("Failed to parse label for %q: %q. Ignoring the label. err=%v. ", k, v, err)
+				klog.InfoS("Failed to parse label, ignoring the label", "label", fmt.Sprintf("%s:%s", k, v), "err", err)
 				continue
 			}
 
@@ -169,6 +170,23 @@ func (pl *VolumeZone) Filter(ctx context.Context, _ *framework.CycleState, pod *
 		}
 	}
 	return nil
+}
+
+// EventsToRegister returns the possible events that may make a Pod
+// failed by this plugin schedulable.
+func (pl *VolumeZone) EventsToRegister() []framework.ClusterEvent {
+	return []framework.ClusterEvent{
+		// New storageClass with bind mode `VolumeBindingWaitForFirstConsumer` will make a pod schedulable.
+		// Due to immutable field `storageClass.volumeBindingMode`, storageClass update events are ignored.
+		{Resource: framework.StorageClass, ActionType: framework.Add},
+		// A new node or updating a node's volume zone labels may make a pod schedulable.
+		{Resource: framework.Node, ActionType: framework.Add | framework.UpdateNodeLabel},
+		// A new pvc may make a pod schedulable.
+		// Due to fields are immutable except `spec.resources`, pvc update events are ignored.
+		{Resource: framework.PersistentVolumeClaim, ActionType: framework.Add},
+		// A new pv or updating a pv's volume zone labels may make a pod shedulable.
+		{Resource: framework.PersistentVolume, ActionType: framework.Add | framework.Update},
+	}
 }
 
 // New initializes a new plugin and returns it.

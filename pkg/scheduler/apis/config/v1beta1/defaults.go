@@ -28,9 +28,6 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/utils/pointer"
-
-	// this package shouldn't really depend on other k8s.io/kubernetes code
-	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
 var defaultResourceSpec = []v1beta1.ResourceSpec{
@@ -55,7 +52,7 @@ func SetDefaults_KubeSchedulerConfiguration(obj *v1beta1.KubeSchedulerConfigurat
 	// Only apply a default scheduler name when there is a single profile.
 	// Validation will ensure that every profile has a non-empty unique name.
 	if len(obj.Profiles) == 1 && obj.Profiles[0].SchedulerName == nil {
-		obj.Profiles[0].SchedulerName = pointer.StringPtr(api.DefaultSchedulerName)
+		obj.Profiles[0].SchedulerName = pointer.StringPtr(corev1.DefaultSchedulerName)
 	}
 
 	// For Healthz and Metrics bind addresses, we want to check:

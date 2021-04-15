@@ -3,7 +3,6 @@
 filters:
   ".*":
     approvers:
-    - erictune
     - lavalamp
     - smarterclayton
     - thockin
@@ -20,9 +19,6 @@ filters:
     - vishh
     - mikedanese
     - liggitt
-    - nikhiljindal
-    - gmarek
-    - erictune
     - pmorie
     - sttts
     - dchen1107
@@ -40,7 +36,6 @@ filters:
     - piosz
     - dims
     - errordeveloper
-    - madhusudancs
     - krousey
     - rootfs
 

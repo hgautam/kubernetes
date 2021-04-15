@@ -42,7 +42,7 @@ var (
 		`+cmdutil.AlphaDisclaimer), kubeadmconstants.ServiceAccountPrivateKeyName, kubeadmconstants.ServiceAccountPublicKeyName)
 
 	genericLongDesc = cmdutil.LongDesc(`
-		Generate the %[1]s, and save them into %[2]s.cert and %[2]s.key files.%[3]s
+		Generate the %[1]s, and save them into %[2]s.crt and %[2]s.key files.%[3]s
 
 		If both files already exist, kubeadm skips the generation step and existing files will be used.
 		` + cmdutil.AlphaDisclaimer)
@@ -154,12 +154,12 @@ func getCertPhaseFlags(name string) []string {
 
 func getSANDescription(certSpec *certsphase.KubeadmCert) string {
 	//Defaulted config we will use to get SAN certs
-	defaultConfig := &kubeadmapiv1beta2.InitConfiguration{
-		LocalAPIEndpoint: kubeadmapiv1beta2.APIEndpoint{
-			// GetAPIServerAltNames errors without an AdvertiseAddress; this is as good as any.
-			AdvertiseAddress: "127.0.0.1",
-		},
+	defaultConfig := cmdutil.DefaultInitConfiguration()
+	// GetAPIServerAltNames errors without an AdvertiseAddress; this is as good as any.
+	defaultConfig.LocalAPIEndpoint = kubeadmapiv1beta2.APIEndpoint{
+		AdvertiseAddress: "127.0.0.1",
 	}
+
 	defaultInternalConfig := &kubeadmapi.InitConfiguration{}
 
 	kubeadmscheme.Scheme.Default(defaultConfig)
@@ -263,7 +263,7 @@ func runCertPhase(cert *certsphase.KubeadmCert, caCert *certsphase.KubeadmCert) 
 			return nil
 		}
 
-		if certData, _, err := pkiutil.TryLoadCertAndKeyFromDisk(data.CertificateDir(), cert.BaseName); err == nil {
+		if certData, intermediates, err := pkiutil.TryLoadCertChainFromDisk(data.CertificateDir(), cert.BaseName); err == nil {
 			certsphase.CheckCertificatePeriodValidity(cert.BaseName, certData)
 
 			caCertData, err := pkiutil.TryLoadCertFromDisk(data.CertificateDir(), caCert.BaseName)
@@ -273,7 +273,7 @@ func runCertPhase(cert *certsphase.KubeadmCert, caCert *certsphase.KubeadmCert) 
 
 			certsphase.CheckCertificatePeriodValidity(caCert.BaseName, caCertData)
 
-			if err := certData.CheckSignatureFrom(caCertData); err != nil {
+			if err := pkiutil.VerifyCertChain(certData, intermediates, caCertData); err != nil {
 				return errors.Wrapf(err, "[certs] certificate %s not signed by CA certificate %s", cert.BaseName, caCert.BaseName)
 			}
 
