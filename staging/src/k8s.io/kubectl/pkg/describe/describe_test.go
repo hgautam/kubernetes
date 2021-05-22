@@ -284,6 +284,10 @@ func TestDescribeConfigMap(t *testing.T) {
 			"key1": "value1",
 			"key2": "value2",
 		},
+		BinaryData: map[string][]byte{
+			"binarykey1": {0xFF, 0xFE, 0xFD, 0xFC, 0xFB},
+			"binarykey2": {0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA},
+		},
 	})
 	c := &describeClient{T: t, Namespace: "foo", Interface: fake}
 	d := ConfigMapDescriber{c}
@@ -291,7 +295,13 @@ func TestDescribeConfigMap(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "foo") || !strings.Contains(out, "mycm") || !strings.Contains(out, "key1") || !strings.Contains(out, "value1") || !strings.Contains(out, "key2") || !strings.Contains(out, "value2") {
+	if !strings.Contains(out, "foo") || !strings.Contains(out, "mycm") {
+		t.Errorf("unexpected out: %s", out)
+	}
+	if !strings.Contains(out, "key1") || !strings.Contains(out, "value1") || !strings.Contains(out, "key2") || !strings.Contains(out, "value2") {
+		t.Errorf("unexpected out: %s", out)
+	}
+	if !strings.Contains(out, "binarykey1") || !strings.Contains(out, "5 bytes") || !strings.Contains(out, "binarykey2") || !strings.Contains(out, "6 bytes") {
 		t.Errorf("unexpected out: %s", out)
 	}
 }
@@ -4874,6 +4884,7 @@ Events:         <none>` + "\n",
 						Addresses:  []string{"1.2.3.6", "1.2.3.7"},
 						Conditions: discoveryv1.EndpointConditions{Ready: utilpointer.BoolPtr(true)},
 						TargetRef:  &corev1.ObjectReference{Kind: "Pod", Name: "test-124"},
+						NodeName:   utilpointer.StringPtr("node-2"),
 					},
 				},
 				Ports: []discoveryv1.EndpointPort{
@@ -4906,7 +4917,7 @@ Endpoints:
       Ready:    true
     Hostname:   <unset>
     TargetRef:  Pod/test-124
-    NodeName:   <unset>
+    NodeName:   node-2
     Zone:       <unset>
 Events:         <none>` + "\n",
 		},

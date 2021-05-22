@@ -28,6 +28,9 @@ set -o pipefail
 ### Hardcoded constants
 METADATA_SERVER_IP="${METADATA_SERVER_IP:-169.254.169.254}"
 
+# Standard curl flags.
+CURL_FLAGS='--fail --silent --show-error --retry 5 --retry-delay 3 --connect-timeout 10 --retry-connrefused'
+
 function convert-manifest-params {
   # A helper function to convert the manifest args from a string to a list of
   # flag arguments.
@@ -173,8 +176,9 @@ function config-ip-firewall {
   # node because we don't expect the daemonset to run on this node.
   if [[ "${ENABLE_METADATA_CONCEALMENT:-}" == "true" ]] && [[ ! "${METADATA_CONCEALMENT_NO_FIREWALL:-}" == "true" ]]; then
     echo "Add rule for metadata concealment"
-    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 80 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j REDIRECT --to-ports 988
-    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 8080 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j REDIRECT --to-ports 987
+    ip addr add dev lo 169.254.169.252/32
+    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 80 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j DNAT --to-destination 169.254.169.252:988
+    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 8080 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j DNAT --to-destination 169.254.169.252:987
   fi
   iptables -w -t mangle -I OUTPUT -s 169.254.169.254 -j DROP
 
@@ -720,23 +724,10 @@ function create-master-pki {
 # After the first boot and on upgrade, these files exist on the master-pd
 # and should never be touched again (except perhaps an additional service
 # account, see NB below.) One exception is if METADATA_CLOBBERS_CONFIG is
-# enabled. In that case the basic_auth.csv file will be rewritten to make
-# sure it matches the metadata source of truth.
+# enabled.
 function create-master-auth {
   echo "Creating master auth files"
   local -r auth_dir="/etc/srv/kubernetes"
-  local -r basic_auth_csv="${auth_dir}/basic_auth.csv"
-  if [[ -n "${KUBE_PASSWORD:-}" && -n "${KUBE_USER:-}" ]]; then
-    if [[ -e "${basic_auth_csv}" && "${METADATA_CLOBBERS_CONFIG:-false}" == "true" ]]; then
-      # If METADATA_CLOBBERS_CONFIG is true, we want to rewrite the file
-      # completely, because if we're changing KUBE_USER and KUBE_PASSWORD, we
-      # have nothing to match on.  The file is replaced just below with
-      # append_or_replace_prefixed_line.
-      rm "${basic_auth_csv}"
-    fi
-    append_or_replace_prefixed_line "${basic_auth_csv}" "${KUBE_PASSWORD},${KUBE_USER},"      "admin,system:masters"
-  fi
-
   local -r known_tokens_csv="${auth_dir}/known_tokens.csv"
   if [[ -e "${known_tokens_csv}" && "${METADATA_CLOBBERS_CONFIG:-false}" == "true" ]]; then
     rm "${known_tokens_csv}"
@@ -818,6 +809,12 @@ EOF
     use_cloud_config="true"
     cat <<EOF >>/etc/gce.conf
 network-project-id = ${NETWORK_PROJECT_ID}
+EOF
+  fi
+  if [[ -n "${STACK_TYPE:-}" ]]; then
+    use_cloud_config="true"
+    cat <<EOF >>/etc/gce.conf
+stack-type = ${STACK_TYPE}
 EOF
   fi
   if [[ -n "${NODE_NETWORK:-}" ]]; then
@@ -1222,7 +1219,7 @@ rules:
         resources: ["tokenreviews"]
     omitStages:
       - "RequestReceived"
-  # Get repsonses can be large; skip them.
+  # Get responses can be large; skip them.
   - level: Request
     verbs: ["get", "list", "watch"]
     resources: ${known_apis}
@@ -1269,9 +1266,14 @@ EOF
 function create-kubeconfig {
   local component=$1
   local token=$2
-  echo "Creating kubeconfig file for component ${component}"
+  local path="/etc/srv/kubernetes/${component}/kubeconfig"
   mkdir -p "/etc/srv/kubernetes/${component}"
-  cat <<EOF >"/etc/srv/kubernetes/${component}/kubeconfig"
+
+  if [[ -e "${KUBE_HOME}/bin/gke-internal-configure-helper.sh" ]]; then
+    gke-internal-create-kubeconfig "${component}" "${token}" "${path}"
+  else
+    echo "Creating kubeconfig file for component ${component}"
+    cat <<EOF >"${path}"
 apiVersion: v1
 kind: Config
 users:
@@ -1290,6 +1292,7 @@ contexts:
   name: ${component}
 current-context: ${component}
 EOF
+  fi
 }
 
 # Arg 1: the IP address of the API server
@@ -1768,7 +1771,7 @@ function start-kube-proxy {
 # $5: pod name, which should be either etcd or etcd-events
 function prepare-etcd-manifest {
   local host_name=${ETCD_HOSTNAME:-$(hostname -s)}
-  local -r host_ip=$(${PYTHON} -c "import socket;print(socket.gethostbyname(\"${host_name}\"))")
+  local -r host_ip=$(python3 -c "import socket;print(socket.gethostbyname(\"${host_name}\"))")
   local etcd_cluster=""
   local cluster_state="new"
   local etcd_protocol="http"
@@ -1935,6 +1938,26 @@ function prepare-konnectivity-server-manifest {
   sed -i -e "s@{{ *health_port *}}@$2@g" "${temp_file}"
   sed -i -e "s@{{ *admin_port *}}@$3@g" "${temp_file}"
   sed -i -e "s@{{ *liveness_probe_initial_delay *}}@30@g" "${temp_file}"
+  if [[ -n "${KONNECTIVITY_SERVER_RUNASUSER:-}" && -n "${KONNECTIVITY_SERVER_RUNASGROUP:-}" && -n "${KONNECTIVITY_SERVER_SOCKET_WRITER_GROUP:-}" ]]; then
+    sed -i -e "s@{{ *run_as_user *}}@runAsUser: ${KONNECTIVITY_SERVER_RUNASUSER}@g" "${temp_file}"
+    sed -i -e "s@{{ *run_as_group *}}@runAsGroup: ${KONNECTIVITY_SERVER_RUNASGROUP}@g" "${temp_file}"
+    sed -i -e "s@{{ *supplemental_groups *}}@supplementalGroups: [${KUBE_PKI_READERS_GROUP}]@g" "${temp_file}"
+    sed -i -e "s@{{ *container_security_context *}}@securityContext:@g" "${temp_file}"
+    sed -i -e "s@{{ *capabilities *}}@capabilities:@g" "${temp_file}"
+    sed -i -e "s@{{ *drop_capabilities *}}@drop: [ ALL ]@g" "${temp_file}"
+    sed -i -e "s@{{ *disallow_privilege_escalation *}}@allowPrivilegeEscalation: false@g" "${temp_file}"
+    mkdir -p /etc/srv/kubernetes/konnectivity-server/
+    chown -R "${KONNECTIVITY_SERVER_RUNASUSER}":"${KONNECTIVITY_SERVER_RUNASGROUP}" /etc/srv/kubernetes/konnectivity-server
+    chmod g+w /etc/srv/kubernetes/konnectivity-server
+  else
+    sed -i -e "s@{{ *run_as_user *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *run_as_group *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *supplemental_groups *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *container_security_context *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *capabilities *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *drop_capabilities *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *disallow_privilege_escalation *}}@@g" "${temp_file}"
+  fi
   mv "${temp_file}" /etc/kubernetes/manifests
 }
 
@@ -1943,7 +1966,7 @@ function prepare-konnectivity-server-manifest {
 # in the manifests, and copies them to /etc/kubernetes/manifests.
 function start-konnectivity-server {
   echo "Start konnectivity server pods"
-  prepare-log-file /var/log/konnectivity-server.log
+  prepare-log-file /var/log/konnectivity-server.log "${KONNECTIVITY_SERVER_RUNASUSER:-0}"
   prepare-konnectivity-server-manifest "8132" "8133" "8134"
 }
 
@@ -2030,18 +2053,6 @@ function update-node-label() {
   done
 }
 
-# A helper function that sets file permissions for kube-controller-manager to
-# run as non root.
-# User and group should never contain characters that need to be quoted
-# shellcheck disable=SC2086
-function run-kube-controller-manager-as-non-root {
-  prepare-log-file /var/log/kube-controller-manager.log ${KUBE_CONTROLLER_MANAGER_RUNASUSER}
-  setfacl -m u:${KUBE_CONTROLLER_MANAGER_RUNASUSER}:r "${CA_CERT_BUNDLE_PATH}"
-  setfacl -m u:${KUBE_CONTROLLER_MANAGER_RUNASUSER}:r "${SERVICEACCOUNT_CERT_PATH}"
-  setfacl -m u:${KUBE_CONTROLLER_MANAGER_RUNASUSER}:r "${SERVICEACCOUNT_KEY_PATH}"
-}
-
-
 # Starts kubernetes controller manager.
 # It prepares the log file, loads the docker image, calculates variables, sets them
 # in the manifest file, and then copies the manifest file to /etc/kubernetes/manifests.
@@ -2060,7 +2071,7 @@ function start-kube-controller-manager {
   fi
   echo "Start kubernetes controller-manager"
   create-kubeconfig "kube-controller-manager" "${KUBE_CONTROLLER_MANAGER_TOKEN}"
-  prepare-log-file /var/log/kube-controller-manager.log
+  prepare-log-file /var/log/kube-controller-manager.log "${KUBE_CONTROLLER_MANAGER_RUNASUSER:-0}"
   # Calculate variables and assemble the command line.
   local params=("${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=2"}" "${CONTROLLER_MANAGER_TEST_ARGS:-}" "${CLOUD_CONFIG_OPT}")
   local config_path='/etc/srv/kubernetes/kube-controller-manager/kubeconfig'
@@ -2149,12 +2160,13 @@ function start-kube-controller-manager {
   sed -i -e "s@{{cpurequest}}@${KUBE_CONTROLLER_MANAGER_CPU_REQUEST}@g" "${src_file}"
 
   if [[ -n "${KUBE_CONTROLLER_MANAGER_RUNASUSER:-}" && -n "${KUBE_CONTROLLER_MANAGER_RUNASGROUP:-}" ]]; then
-    run-kube-controller-manager-as-non-root
-    sed -i -e "s@{{runAsUser}}@${KUBE_CONTROLLER_MANAGER_RUNASUSER}@g" "${src_file}"
-    sed -i -e "s@{{runAsGroup}}@${KUBE_CONTROLLER_MANAGER_RUNASGROUP}@g" "${src_file}"
+    sed -i -e "s@{{runAsUser}}@\"runAsUser\": ${KUBE_CONTROLLER_MANAGER_RUNASUSER},@g" "${src_file}"
+    sed -i -e "s@{{runAsGroup}}@\"runAsGroup\":${KUBE_CONTROLLER_MANAGER_RUNASGROUP},@g" "${src_file}"
+    sed -i -e "s@{{supplementalGroups}}@\"supplementalGroups\": [ ${KUBE_PKI_READERS_GROUP} ],@g" "${src_file}"
   else
-    sed -i -e "s@{{runAsUser}}@0@g" "${src_file}"
-    sed -i -e "s@{{runAsGroup}}@0@g" "${src_file}"
+    sed -i -e "s@{{runAsUser}}@@g" "${src_file}"
+    sed -i -e "s@{{runAsGroup}}@@g" "${src_file}"
+    sed -i -e "s@{{supplementalGroups}}@@g" "${src_file}"
   fi
 
   cp "${src_file}" /etc/kubernetes/manifests
@@ -2289,14 +2301,10 @@ function download-extra-addons {
 
   mkdir -p "${out_dir}"
 
+  # shellcheck disable=SC2206
   local curl_cmd=(
     "curl"
-    "--fail"
-    "--retry" "5"
-    "--retry-delay" "3"
-    "--silent"
-    "--show-error"
-    "--retry-connrefused"
+    ${CURL_FLAGS}
   )
   if [[ -n "${EXTRA_ADDONS_HEADER:-}" ]]; then
     curl_cmd+=("-H" "${EXTRA_ADDONS_HEADER}")
@@ -2318,14 +2326,10 @@ function get-metadata-value {
   local default="${2:-}"
 
   local status
-  curl \
-      --retry 5 \
-      --retry-delay 3 \
-      --retry-connrefused \
-      --fail \
-      --silent \
-      -H 'Metadata-Flavor: Google' \
-      "http://metadata/computeMetadata/v1/${1}" \
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    -H 'Metadata-Flavor: Google' \
+    "http://metadata/computeMetadata/v1/${1}" \
   || status="$?"
   status="${status:-0}"
 
@@ -3169,7 +3173,7 @@ function log-trap-pop {
 function log-error {
   local bootstep="$1"
 
-  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "error calling '${BASH_COMMAND}'"
+  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "encountered non-zero exit code"
 }
 
 # Wraps a command with bootstrap logging.
@@ -3274,24 +3278,6 @@ function main() {
   KUBE_BIN=${KUBE_HOME}/bin
   CONTAINERIZED_MOUNTER_HOME="${KUBE_HOME}/containerized_mounter"
   PV_RECYCLER_OVERRIDE_TEMPLATE="${KUBE_HOME}/kube-manifests/kubernetes/pv-recycler-template.yaml"
-
-  log-start 'SetPythonVersion'
-  if [[ "$(python -V 2>&1)" =~ "Python 2" ]]; then
-    # found python2, just use that
-    PYTHON="python"
-  elif [[ -f "/usr/bin/python2.7" ]]; then
-    # System python not defaulted to python 2 but using 2.7 during migration
-    PYTHON="/usr/bin/python2.7"
-  else
-    # No python2 either by default, let's see if we can find python3
-    PYTHON="python3"
-    if ! command -v ${PYTHON} >/dev/null 2>&1; then
-      echo "ERROR Python not found. Aborting."
-      exit 2
-    fi
-  fi
-  echo "Version :  $(${PYTHON} -V 2>&1)"
-  log-end 'SetPythonVersion'
 
   log-start 'SourceKubeEnv'
   if [[ ! -e "${KUBE_HOME}/kube-env" ]]; then

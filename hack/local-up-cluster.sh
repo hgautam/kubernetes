@@ -234,7 +234,6 @@ CONTAINER_RUNTIME=${CONTAINER_RUNTIME:-"docker"}
 CONTAINER_RUNTIME_ENDPOINT=${CONTAINER_RUNTIME_ENDPOINT:-""}
 RUNTIME_REQUEST_TIMEOUT=${RUNTIME_REQUEST_TIMEOUT:-"2m"}
 IMAGE_SERVICE_ENDPOINT=${IMAGE_SERVICE_ENDPOINT:-""}
-CHAOS_CHANCE=${CHAOS_CHANCE:-0.0}
 CPU_CFS_QUOTA=${CPU_CFS_QUOTA:-true}
 ENABLE_HOSTPATH_PROVISIONER=${ENABLE_HOSTPATH_PROVISIONER:-"false"}
 CLAIM_BINDER_SYNC_PERIOD=${CLAIM_BINDER_SYNC_PERIOD:-"15s"} # current k8s default
@@ -655,6 +654,8 @@ function start_controller_manager {
       --pvclaimbinder-sync-period="${CLAIM_BINDER_SYNC_PERIOD}" \
       --feature-gates="${FEATURE_GATES}" \
       "${cloud_config_arg[@]}" \
+      --authentication-kubeconfig "${CERT_DIR}"/controller.kubeconfig \
+      --authorization-kubeconfig "${CERT_DIR}"/controller.kubeconfig \
       --kubeconfig "${CERT_DIR}"/controller.kubeconfig \
       --use-service-account-credentials \
       --controllers="${KUBE_CONTROLLERS}" \
@@ -751,7 +752,6 @@ function start_kubelet {
     all_kubelet_flags=(
       "--v=${LOG_LEVEL}"
       "--vmodule=${LOG_SPEC}"
-      "--chaos-chance=${CHAOS_CHANCE}"
       "--container-runtime=${CONTAINER_RUNTIME}"
       "--hostname-override=${HOSTNAME_OVERRIDE}"
       "${cloud_config_arg[@]}"
@@ -919,6 +919,8 @@ EOF
       --v="${LOG_LEVEL}" \
       --config=/tmp/kube-scheduler.yaml \
       --feature-gates="${FEATURE_GATES}" \
+      --authentication-kubeconfig "${CERT_DIR}"/scheduler.kubeconfig \
+      --authorization-kubeconfig "${CERT_DIR}"/scheduler.kubeconfig \
       --master="https://${API_HOST}:${API_SECURE_PORT}" >"${SCHEDULER_LOG}" 2>&1 &
     SCHEDULER_PID=$!
 }

@@ -33,6 +33,9 @@ DEFAULT_CRICTL_HASH='e4fb9822cb5f71ab8f85021c66170613aae972f4b32030e42868fb36a3b
 DEFAULT_MOUNTER_TAR_SHA='7956fd42523de6b3107ddc3ce0e75233d2fcb78436ff07a1389b6eaac91fb2b1b72a08f7a219eaf96ba1ca4da8d45271002e0d60e0644e796c665f99bb356516'
 ###
 
+# Standard curl flags.
+CURL_FLAGS='--fail --silent --show-error --retry 5 --retry-delay 3 --connect-timeout 10 --retry-connrefused'
+
 function set-broken-motd {
   cat > /etc/motd <<EOF
 Broken (or in progress) Kubernetes node setup! Check the cluster initialization status
@@ -59,14 +62,10 @@ function get-metadata-value {
   local default="${2:-}"
 
   local status
-  curl \
-      --retry 5 \
-      --retry-delay 3 \
-      --retry-connrefused \
-      --fail \
-      --silent \
-      -H 'Metadata-Flavor: Google' \
-      "http://metadata/computeMetadata/v1/${1}" \
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    -H 'Metadata-Flavor: Google' \
+    "http://metadata/computeMetadata/v1/${1}" \
   || status="$?"
   status="${status:-0}"
 
@@ -82,18 +81,15 @@ function download-kube-env {
   (
     umask 077
     local -r tmp_kube_env="/tmp/kube-env.yaml"
-    curl --fail --retry 5 --retry-delay 3 --retry-connrefused --silent --show-error \
+    # shellcheck disable=SC2086
+    retry-forever 10 curl ${CURL_FLAGS} \
       -H "X-Google-Metadata-Request: True" \
       -o "${tmp_kube_env}" \
       http://metadata.google.internal/computeMetadata/v1/instance/attributes/kube-env
     # Convert the yaml format file into a shell-style file.
-    eval "$(${PYTHON} -c '''
+    eval "$(python3 -c '''
 import pipes,sys,yaml
-# check version of python and call methods appropriate for that version
-if sys.version_info[0] < 3:
-    items = yaml.load(sys.stdin).iteritems()
-else:
-    items = yaml.load(sys.stdin, Loader=yaml.BaseLoader).items()
+items = yaml.load(sys.stdin, Loader=yaml.BaseLoader).items()
 for k, v in items:
     print("readonly {var}={value}".format(var=k, value=pipes.quote(str(v))))
 ''' < "${tmp_kube_env}" > "${KUBE_HOME}/kube-env")"
@@ -108,16 +104,13 @@ function download-kubelet-config {
   (
     umask 077
     local -r tmp_kubelet_config="/tmp/kubelet-config.yaml"
-    if curl --fail --retry 5 --retry-delay 3 --retry-connrefused --silent --show-error \
-        -H "X-Google-Metadata-Request: True" \
-        -o "${tmp_kubelet_config}" \
-        http://metadata.google.internal/computeMetadata/v1/instance/attributes/kubelet-config; then
-      # only write to the final location if curl succeeds
-      mv "${tmp_kubelet_config}" "${dest}"
-    elif [[ "${REQUIRE_METADATA_KUBELET_CONFIG_FILE:-false}" == "true" ]]; then
-      echo "== Failed to download required Kubelet config file from metadata server =="
-      exit 1
-    fi
+    # shellcheck disable=SC2086
+    retry-forever 10 curl ${CURL_FLAGS} \
+      -H "X-Google-Metadata-Request: True" \
+      -o "${tmp_kubelet_config}" \
+      http://metadata.google.internal/computeMetadata/v1/instance/attributes/kubelet-config
+    # only write to the final location if curl succeeds
+    mv "${tmp_kubelet_config}" "${dest}"
   )
 }
 
@@ -126,18 +119,15 @@ function download-kube-master-certs {
   (
     umask 077
     local -r tmp_kube_master_certs="/tmp/kube-master-certs.yaml"
-    curl --fail --retry 5 --retry-delay 3 --retry-connrefused --silent --show-error \
+    # shellcheck disable=SC2086
+    retry-forever 10 curl ${CURL_FLAGS} \
       -H "X-Google-Metadata-Request: True" \
       -o "${tmp_kube_master_certs}" \
       http://metadata.google.internal/computeMetadata/v1/instance/attributes/kube-master-certs
     # Convert the yaml format file into a shell-style file.
-    eval "$(${PYTHON} -c '''
+    eval "$(python3 -c '''
 import pipes,sys,yaml
-# check version of python and call methods appropriate for that version
-if sys.version_info[0] < 3:
-    items = yaml.load(sys.stdin).iteritems()
-else:
-    items = yaml.load(sys.stdin, Loader=yaml.BaseLoader).items()
+items = yaml.load(sys.stdin, Loader=yaml.BaseLoader).items()
 for k, v in items:
     print("readonly {var}={value}".format(var=k, value=pipes.quote(str(v))))
 ''' < "${tmp_kube_master_certs}" > "${KUBE_HOME}/kube-master-certs")"
@@ -160,12 +150,19 @@ function validate-hash {
 # Get default service account credentials of the VM.
 GCE_METADATA_INTERNAL="http://metadata.google.internal/computeMetadata/v1/instance"
 function get-credentials {
-  curl --fail --retry 5 --retry-delay 3 --retry-connrefused --silent --show-error "${GCE_METADATA_INTERNAL}/service-accounts/default/token" -H "Metadata-Flavor: Google" -s | ${PYTHON} -c \
-    'import sys; import json; print(json.loads(sys.stdin.read())["access_token"])'
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    -H "Metadata-Flavor: Google" \
+    "${GCE_METADATA_INTERNAL}/service-accounts/default/token" \
+  | python3 -c 'import sys; import json; print(json.loads(sys.stdin.read())["access_token"])'
 }
 
 function valid-storage-scope {
-  curl --fail --retry 5 --retry-delay 3 --retry-connrefused --silent --show-error "${GCE_METADATA_INTERNAL}/service-accounts/default/scopes" -H "Metadata-Flavor: Google" -s | grep -E "auth/devstorage|auth/cloud-platform"
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    -H "Metadata-Flavor: Google" \
+    "${GCE_METADATA_INTERNAL}/service-accounts/default/scopes" \
+  | grep -E "auth/devstorage|auth/cloud-platform"
 }
 
 # Retry a download until we get it. Takes a hash and a set of URLs.
@@ -463,8 +460,11 @@ function install-docker {
   release=$(lsb_release -cs)
 
   # Add the Docker apt-repository
-  curl -fsSL "https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID")/gpg" \
-    | apt-key add -
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    --location \
+    "https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID")/gpg" \
+  | apt-key add -
   add-apt-repository \
     "deb [arch=${HOST_ARCH}] https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID") \
     $release stable"
@@ -499,8 +499,11 @@ function install-containerd-ubuntu {
   release=$(lsb_release -cs)
 
   # Add the Docker apt-repository (as we install containerd from there)
-  curl -fsSL "https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID")/gpg" \
-    | apt-key add -
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    --location \
+    "https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID")/gpg" \
+  | apt-key add -
   add-apt-repository \
     "deb [arch=${HOST_ARCH}] https://download.docker.com/${HOST_PLATFORM}/$(. /etc/os-release; echo "$ID") \
     $release stable"
@@ -519,8 +522,13 @@ function install-containerd-ubuntu {
       exit 2
     fi
     # containerd versions have slightly different url(s), so try both
-    ( curl -fsSL "https://github.com/containerd/containerd/releases/download/${UBUNTU_INSTALL_CONTAINERD_VERSION}/containerd-${UBUNTU_INSTALL_CONTAINERD_VERSION:1}-${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" || \
-      curl -fsSL "https://github.com/containerd/containerd/releases/download/${UBUNTU_INSTALL_CONTAINERD_VERSION}/containerd-${UBUNTU_INSTALL_CONTAINERD_VERSION:1}.${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" ) \
+    # shellcheck disable=SC2086
+    ( curl ${CURL_FLAGS} \
+        --location \
+        "https://github.com/containerd/containerd/releases/download/${UBUNTU_INSTALL_CONTAINERD_VERSION}/containerd-${UBUNTU_INSTALL_CONTAINERD_VERSION:1}-${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" \
+      || curl ${CURL_FLAGS} \
+        --location \
+        "https://github.com/containerd/containerd/releases/download/${UBUNTU_INSTALL_CONTAINERD_VERSION}/containerd-${UBUNTU_INSTALL_CONTAINERD_VERSION:1}.${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" ) \
     | tar --overwrite -xzv -C /usr/
   fi
   if [[ -n "${UBUNTU_INSTALL_RUNC_VERSION:-}" ]]; then
@@ -529,7 +537,11 @@ function install-containerd-ubuntu {
       echo "Unable to automatically install runc in non-amd64. Bailing out..."
       exit 2
     fi
-    curl -fsSL "https://github.com/opencontainers/runc/releases/download/${UBUNTU_INSTALL_RUNC_VERSION}/runc.${HOST_ARCH}" --output /usr/sbin/runc && chmod 755 /usr/sbin/runc
+    # shellcheck disable=SC2086
+    curl ${CURL_FLAGS} \
+      --location \
+      "https://github.com/opencontainers/runc/releases/download/${UBUNTU_INSTALL_RUNC_VERSION}/runc.${HOST_ARCH}" --output /usr/sbin/runc \
+    && chmod 755 /usr/sbin/runc
   fi
   sudo systemctl start containerd
 }
@@ -763,7 +775,7 @@ function log-trap-pop {
 function log-error {
   local bootstep="$1"
 
-  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "error calling '${BASH_COMMAND}'"
+  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "encountered non-zero exit code"
 }
 
 # Wraps a command with bootstrap logging.
@@ -861,35 +873,16 @@ log-wrap 'SetBrokenMotd' set-broken-motd
 
 KUBE_HOME="/home/kubernetes"
 KUBE_BIN="${KUBE_HOME}/bin"
-PYTHON="python"
-
-log-start 'SetPythonVersion'
-if [[ "$(python -V 2>&1)" =~ "Python 2" ]]; then
-  # found python2, just use that
-  PYTHON="python"
-elif [[ -f "/usr/bin/python2.7" ]]; then
-  # System python not defaulted to python 2 but using 2.7 during migration
-  PYTHON="/usr/bin/python2.7"
-else
-  # No python2 either by default, let's see if we can find python3
-  PYTHON="python3"
-  if ! command -v ${PYTHON} >/dev/null 2>&1; then
-    echo "ERROR Python not found. Aborting."
-    exit 2
-  fi
-fi
-echo "Version :  $(${PYTHON} -V 2>&1)"
-log-end 'SetPythonVersion'
 
 # download and source kube-env
-log-wrap 'DownloadKubeEnv' retry-forever 30 download-kube-env
+log-wrap 'DownloadKubeEnv' download-kube-env
 log-wrap 'SourceKubeEnv' source "${KUBE_HOME}/kube-env"
 
-log-wrap 'DownloadKubeletConfig' retry-forever 10 download-kubelet-config "${KUBE_HOME}/kubelet-config.yaml"
+log-wrap 'DownloadKubeletConfig' download-kubelet-config "${KUBE_HOME}/kubelet-config.yaml"
 
 # master certs
 if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
-  log-wrap 'DownloadKubeMasterCerts' retry-forever 10 download-kube-master-certs
+  log-wrap 'DownloadKubeMasterCerts' download-kube-master-certs
 fi
 
 # ensure chosen container runtime is present

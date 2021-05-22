@@ -171,55 +171,47 @@ aliases:
 
   sig-scheduling-maintainers:
     - alculquicondor
-    - k82cn
-    - wojtek-t
-    - ravisantoshgudimetla
     - Huang-Wei
     - ahg-g
     - damemi
   # emeritus:
   # - bsalamat
+  # - k82cn
+  # - ravisantoshgudimetla
+  # - wojtek-t  
   sig-scheduling:
-    - k82cn
-    - resouer
-    - ravisantoshgudimetla
-    - Huang-Wei
-    - wgliang
+    - Huang-Wei    
     - ahg-g
-    - draveness
-    - hex108
     - alculquicondor
-    - liu-cong
     - damemi
     - chendave
     - adtac
+  # emeritus:
+  # - liu-cong
+  # - draveness
+  # - hex108
+  # - resouer
+  # - wgliang
 
   sig-cli-maintainers:
-    - brendandburns
     - deads2k
     - janetkuo
     - seans3
     - monopole
-    - droot
     - apelisse
-    - mengqiy
-    - smarterclayton
     - soltysh
     - pwittrock
     - eddiezane
   # emeritus:
   # - adohe
+  # - brendandburns
+  # - droot
+  # - mengqiy
+  # - smarterclayton
   sig-cli:
     - brianpursley
-    - deads2k
-    - derekwaynecarr
     - dixudx
-    - dims
-    - mengqiy
-    - rootfs
     - seans3
-    - shiywang
-    - smarterclayton
     - soltysh
     - pwittrock
     - zhouya0
@@ -273,6 +265,7 @@ aliases:
     - andrewsykim
     - mrunalp
     - SergeyKanzhelev
+    - bobbypage
   sig-network-driver-approvers:
     - dcbw
     - freehan
@@ -458,6 +451,7 @@ aliases:
     - janetkuo
     - kow3ns
     - soltysh
+    - alculquicondor
 
   sig-auth-api-reviewers:
     - enj
@@ -501,12 +495,13 @@ aliases:
     - wojtek-t
 
   sig-scalability-reviewers:
+    - marseel
+    - mborsz
     - mm4tt
     - wojtek-t
 
-  # sig-scheduling-api-reviewers:
-  #   -
-  #   -
+  sig-scheduling-api-reviewers:
+    - alculquicondor
 
   sig-storage-api-reviewers:
     - deads2k
@@ -535,6 +530,8 @@ aliases:
     - thockin
     - sttts
     - soltysh
+  dep-reviewers:
+    - logicalhan
   feature-approvers:
     - andrewsykim     # Cloud Provider
     - brancz          # Instrumentation

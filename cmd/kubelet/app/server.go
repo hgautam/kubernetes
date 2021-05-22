@@ -38,6 +38,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
+	cadvisorapi "github.com/google/cadvisor/info/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,6 +83,7 @@ import (
 	kubeletcertificate "k8s.io/kubernetes/pkg/kubelet/certificate"
 	"k8s.io/kubernetes/pkg/kubelet/certificate/bootstrap"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
+	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -225,7 +227,7 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 				os.Exit(1)
 			}
 
-			if (kubeletConfig.KubeletCgroups != "" && kubeletConfig.KubeReservedCgroup != "") && (0 != strings.Index(kubeletConfig.KubeletCgroups, kubeletConfig.KubeReservedCgroup)) {
+			if (kubeletConfig.KubeletCgroups != "" && kubeletConfig.KubeReservedCgroup != "") && (strings.Index(kubeletConfig.KubeletCgroups, kubeletConfig.KubeReservedCgroup) != 0) {
 				klog.InfoS("unsupported configuration:KubeletCgroups is not within KubeReservedCgroup")
 			}
 
@@ -439,10 +441,10 @@ func Run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 	// To help debugging, immediately log version
 	klog.InfoS("Kubelet version", "kubeletVersion", version.Get())
 	if err := initForOS(s.KubeletFlags.WindowsService, s.KubeletFlags.WindowsPriorityClass); err != nil {
-		return fmt.Errorf("failed OS init: %v", err)
+		return fmt.Errorf("failed OS init: %w", err)
 	}
 	if err := run(ctx, s, kubeDeps, featureGate); err != nil {
-		return fmt.Errorf("failed to run Kubelet: %v", err)
+		return fmt.Errorf("failed to run Kubelet: %w", err)
 	}
 	return nil
 }
@@ -489,6 +491,28 @@ func makeEventRecorder(kubeDeps *kubelet.Dependencies, nodeName types.NodeName) 
 	}
 }
 
+func getReservedCPUs(machineInfo *cadvisorapi.MachineInfo, cpus string) (cpuset.CPUSet, error) {
+	emptyCPUSet := cpuset.NewCPUSet()
+
+	if cpus == "" {
+		return emptyCPUSet, nil
+	}
+
+	topo, err := topology.Discover(machineInfo)
+	if err != nil {
+		return emptyCPUSet, fmt.Errorf("unable to discover CPU topology info: %s", err)
+	}
+	reservedCPUSet, err := cpuset.Parse(cpus)
+	if err != nil {
+		return emptyCPUSet, fmt.Errorf("unable to parse reserved-cpus list: %s", err)
+	}
+	allCPUSet := topo.CPUDetails.CPUs()
+	if !reservedCPUSet.IsSubsetOf(allCPUSet) {
+		return emptyCPUSet, fmt.Errorf("reserved-cpus: %s is not a subset of online-cpus: %s", cpus, allCPUSet.String())
+	}
+	return reservedCPUSet, nil
+}
+
 func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate featuregate.FeatureGate) (err error) {
 	// Set global feature gates based on the value on the initial KubeletServer
 	err = utilfeature.DefaultMutableFeatureGate.SetFromMap(s.KubeletConfiguration.FeatureGates)
@@ -508,7 +532,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 	if s.LockFilePath != "" {
 		klog.InfoS("Acquiring file lock", "path", s.LockFilePath)
 		if err := flock.Acquire(s.LockFilePath); err != nil {
-			return fmt.Errorf("unable to acquire file lock on %q: %v", s.LockFilePath, err)
+			return fmt.Errorf("unable to acquire file lock on %q: %w", s.LockFilePath, err)
 		}
 		if s.ExitOnLockContention {
 			klog.InfoS("Watching for inotify events", "path", s.LockFilePath)
@@ -584,7 +608,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 
 		kubeDeps.KubeClient, err = clientset.NewForConfig(clientConfig)
 		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet client: %v", err)
+			return fmt.Errorf("failed to initialize kubelet client: %w", err)
 		}
 
 		// make a separate client for events
@@ -593,7 +617,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		eventClientConfig.Burst = int(s.EventBurst)
 		kubeDeps.EventClient, err = v1core.NewForConfig(&eventClientConfig)
 		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet event client: %v", err)
+			return fmt.Errorf("failed to initialize kubelet event client: %w", err)
 		}
 
 		// make a separate client for heartbeat with throttling disabled and a timeout attached
@@ -608,7 +632,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		heartbeatClientConfig.QPS = float32(-1)
 		kubeDeps.HeartbeatClient, err = clientset.NewForConfig(&heartbeatClientConfig)
 		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet heartbeat client: %v", err)
+			return fmt.Errorf("failed to initialize kubelet heartbeat client: %w", err)
 		}
 	}
 
@@ -661,37 +685,16 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 			s.CgroupRoot = "/"
 		}
 
-		var reservedSystemCPUs cpuset.CPUSet
-		if s.ReservedSystemCPUs != "" {
-			// is it safe do use CAdvisor here ??
-			machineInfo, err := kubeDeps.CAdvisorInterface.MachineInfo()
-			if err != nil {
-				// if can't use CAdvisor here, fall back to non-explicit cpu list behavor
-				klog.InfoS("Failed to get MachineInfo, set reservedSystemCPUs to empty")
-				reservedSystemCPUs = cpuset.NewCPUSet()
-			} else {
-				var errParse error
-				reservedSystemCPUs, errParse = cpuset.Parse(s.ReservedSystemCPUs)
-				if errParse != nil {
-					// invalid cpu list is provided, set reservedSystemCPUs to empty, so it won't overwrite kubeReserved/systemReserved
-					klog.InfoS("Invalid ReservedSystemCPUs", "systemReservedCPUs", s.ReservedSystemCPUs)
-					return errParse
-				}
-				reservedList := reservedSystemCPUs.ToSlice()
-				first := reservedList[0]
-				last := reservedList[len(reservedList)-1]
-				if first < 0 || last >= machineInfo.NumCores {
-					// the specified cpuset is outside of the range of what the machine has
-					klog.InfoS("Invalid cpuset specified by --reserved-cpus")
-					return fmt.Errorf("Invalid cpuset %q specified by --reserved-cpus", s.ReservedSystemCPUs)
-				}
-			}
-		} else {
-			reservedSystemCPUs = cpuset.NewCPUSet()
+		machineInfo, err := kubeDeps.CAdvisorInterface.MachineInfo()
+		if err != nil {
+			return err
 		}
-
+		reservedSystemCPUs, err := getReservedCPUs(machineInfo, s.ReservedSystemCPUs)
+		if err != nil {
+			return err
+		}
 		if reservedSystemCPUs.Size() > 0 {
-			// at cmd option valication phase it is tested either --system-reserved-cgroup or --kube-reserved-cgroup is specified, so overwrite should be ok
+			// at cmd option validation phase it is tested either --system-reserved-cgroup or --kube-reserved-cgroup is specified, so overwrite should be ok
 			klog.InfoS("Option --reserved-cpus is specified, it will overwrite the cpu setting in KubeReserved and SystemReserved", "kubeReservedCPUs", s.KubeReserved, "systemReservedCPUs", s.SystemReserved)
 			if s.KubeReserved != nil {
 				delete(s.KubeReserved, "cpu")
@@ -909,7 +912,7 @@ func buildKubeletClientConfig(ctx context.Context, s *options.KubeletServer, nod
 		&clientcmd.ConfigOverrides{},
 	).ClientConfig()
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid kubeconfig: %v", err)
+		return nil, nil, fmt.Errorf("invalid kubeconfig: %w", err)
 	}
 
 	kubeClientConfigOverrides(s, clientConfig)
@@ -983,7 +986,7 @@ func getNodeName(cloud cloudprovider.Interface, hostname string) (types.NodeName
 
 	nodeName, err := instances.CurrentNodeName(context.TODO(), hostname)
 	if err != nil {
-		return "", fmt.Errorf("error fetching current node name from cloud provider: %v", err)
+		return "", fmt.Errorf("error fetching current node name from cloud provider: %w", err)
 	}
 
 	klog.V(2).InfoS("Cloud provider determined current node", "nodeName", klog.KRef("", string(nodeName)))
@@ -1009,7 +1012,7 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 			}
 			cert, key, err := certutil.GenerateSelfSignedCertKey(hostName, nil, nil)
 			if err != nil {
-				return nil, fmt.Errorf("unable to generate self signed cert: %v", err)
+				return nil, fmt.Errorf("unable to generate self signed cert: %w", err)
 			}
 
 			if err := certutil.WriteCert(kc.TLSCertFile, cert); err != nil {
@@ -1057,7 +1060,7 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 	if len(kc.Authentication.X509.ClientCAFile) > 0 {
 		clientCAs, err := certutil.NewPool(kc.Authentication.X509.ClientCAFile)
 		if err != nil {
-			return nil, fmt.Errorf("unable to load client CA file %s: %v", kc.Authentication.X509.ClientCAFile, err)
+			return nil, fmt.Errorf("unable to load client CA file %s: %w", kc.Authentication.X509.ClientCAFile, err)
 		}
 		// Specify allowed CAs for client certificates
 		tlsOptions.Config.ClientCAs = clientCAs
@@ -1068,7 +1071,7 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 	return tlsOptions, nil
 }
 
-// setContentTypeForClient sets the appropritae content type into the rest config
+// setContentTypeForClient sets the appropriate content type into the rest config
 // and handles defaulting AcceptContentTypes based on that input.
 func setContentTypeForClient(cfg *restclient.Config, contentType string) {
 	if len(contentType) == 0 {
@@ -1165,7 +1168,7 @@ func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencie
 		kubeServer.SeccompProfileRoot,
 		kubeServer.NodeStatusMaxImages)
 	if err != nil {
-		return fmt.Errorf("failed to create kubelet: %v", err)
+		return fmt.Errorf("failed to create kubelet: %w", err)
 	}
 
 	// NewMainKubelet should have set up a pod source config if one didn't exist
@@ -1182,7 +1185,7 @@ func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencie
 	// process pods and exit.
 	if runOnce {
 		if _, err := k.RunOnce(podCfg.Updates()); err != nil {
-			return fmt.Errorf("runonce failed: %v", err)
+			return fmt.Errorf("runonce failed: %w", err)
 		}
 		klog.InfoS("Started kubelet as runonce")
 	} else {
@@ -1326,7 +1329,7 @@ func BootstrapKubeletConfigController(dynamicConfigDir string, transform dynamic
 	c := dynamickubeletconfig.NewController(dir, transform)
 	kc, err := c.Bootstrap()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to determine a valid configuration, error: %v", err)
+		return nil, nil, fmt.Errorf("failed to determine a valid configuration, error: %w", err)
 	}
 	return kc, c, nil
 }

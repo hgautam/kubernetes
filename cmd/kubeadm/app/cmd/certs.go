@@ -30,7 +30,7 @@ import (
 
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmscheme "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/scheme"
-	kubeadmapiv1beta2 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta2"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -134,7 +134,7 @@ func (o *genCSRConfig) load() (err error) {
 	o.kubeadmConfig, err = configutil.LoadOrDefaultInitConfiguration(
 		o.kubeadmConfigPath,
 		cmdutil.DefaultInitConfiguration(),
-		&kubeadmapiv1beta2.ClusterConfiguration{},
+		&kubeadmapiv1.ClusterConfiguration{},
 	)
 	if err != nil {
 		return err
@@ -214,14 +214,14 @@ func newCmdCertsRenewal(out io.Writer) *cobra.Command {
 type renewFlags struct {
 	cfgPath        string
 	kubeconfigPath string
-	cfg            kubeadmapiv1beta2.ClusterConfiguration
+	cfg            kubeadmapiv1.ClusterConfiguration
 	csrOnly        bool
 	csrPath        string
 }
 
 func getRenewSubCommands(out io.Writer, kdir string) []*cobra.Command {
 	flags := &renewFlags{
-		cfg: kubeadmapiv1beta2.ClusterConfiguration{
+		cfg: kubeadmapiv1.ClusterConfiguration{
 			// Setting kubernetes version to a default value in order to allow a not necessary internet lookup
 			KubernetesVersion: kubeadmconstants.CurrentKubernetesVersion.String(),
 		},
@@ -301,8 +301,14 @@ func addRenewFlags(cmd *cobra.Command, flags *renewFlags) {
 	options.AddConfigFlag(cmd.Flags(), &flags.cfgPath)
 	options.AddCertificateDirFlag(cmd.Flags(), &flags.cfg.CertificatesDir)
 	options.AddKubeConfigFlag(cmd.Flags(), &flags.kubeconfigPath)
+
+	// TODO: remove these flags in a future version:
+	// https://github.com/kubernetes/kubeadm/issues/2163
+	const deprecationMessage = "This flag will be removed in a future version. Please use 'kubeadm certs generate-csr' instead."
 	options.AddCSRFlag(cmd.Flags(), &flags.csrOnly)
+	cmd.Flags().MarkDeprecated(options.CSROnly, deprecationMessage)
 	options.AddCSRDirFlag(cmd.Flags(), &flags.csrPath)
+	cmd.Flags().MarkDeprecated(options.CSRDir, deprecationMessage)
 }
 
 func renewCert(flags *renewFlags, kdir string, internalcfg *kubeadmapi.InitConfiguration, handler *renewal.CertificateRenewHandler) error {
@@ -342,7 +348,7 @@ func renewCert(flags *renewFlags, kdir string, internalcfg *kubeadmapi.InitConfi
 	return nil
 }
 
-func getInternalCfg(cfgPath string, kubeconfigPath string, cfg kubeadmapiv1beta2.ClusterConfiguration, out io.Writer, logPrefix string) (*kubeadmapi.InitConfiguration, error) {
+func getInternalCfg(cfgPath string, kubeconfigPath string, cfg kubeadmapiv1.ClusterConfiguration, out io.Writer, logPrefix string) (*kubeadmapi.InitConfiguration, error) {
 	// In case the user is not providing a custom config, try to get current config from the cluster.
 	// NB. this operation should not block, because we want to allow certificate renewal also in case of not-working clusters
 	if cfgPath == "" {
@@ -364,7 +370,7 @@ func getInternalCfg(cfgPath string, kubeconfigPath string, cfg kubeadmapiv1beta2
 // newCmdCertsExpiration creates a new `cert check-expiration` command.
 func newCmdCertsExpiration(out io.Writer, kdir string) *cobra.Command {
 	flags := &expirationFlags{
-		cfg: kubeadmapiv1beta2.ClusterConfiguration{
+		cfg: kubeadmapiv1.ClusterConfiguration{
 			// Setting kubernetes version to a default value in order to allow a not necessary internet lookup
 			KubernetesVersion: kubeadmconstants.CurrentKubernetesVersion.String(),
 		},
@@ -463,7 +469,7 @@ func newCmdCertsExpiration(out io.Writer, kdir string) *cobra.Command {
 type expirationFlags struct {
 	cfgPath        string
 	kubeconfigPath string
-	cfg            kubeadmapiv1beta2.ClusterConfiguration
+	cfg            kubeadmapiv1.ClusterConfiguration
 }
 
 func addExpirationFlags(cmd *cobra.Command, flags *expirationFlags) {

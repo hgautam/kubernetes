@@ -26,7 +26,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-openapi/spec"
 	"github.com/google/uuid"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -52,6 +51,7 @@ import (
 	"k8s.io/component-base/version"
 	"k8s.io/klog/v2"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
+	"k8s.io/kube-openapi/pkg/validation/spec"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/controlplane"
 	"k8s.io/kubernetes/pkg/generated/openapi"
@@ -172,7 +172,7 @@ func startApiserverOrDie(controlPlaneConfig *controlplane.Config, incomingServer
 		Groups: []string{user.SystemPrivilegedGroup},
 	}
 
-	tokenAuthenticator := authenticatorfactory.NewFromTokens(tokens)
+	tokenAuthenticator := authenticatorfactory.NewFromTokens(tokens, controlPlaneConfig.GenericConfig.Authentication.APIAudiences)
 	if controlPlaneConfig.GenericConfig.Authentication.Authenticator == nil {
 		controlPlaneConfig.GenericConfig.Authentication.Authenticator = authenticatorunion.New(tokenAuthenticator, authauthenticator.RequestFunc(alwaysEmpty))
 	} else {
@@ -309,6 +309,12 @@ func NewMasterConfigWithOptions(opts *MasterConfigOptions) *controlplane.Config 
 
 	genericConfig := genericapiserver.NewConfig(legacyscheme.Codecs)
 	kubeVersion := version.Get()
+	if len(kubeVersion.Major) == 0 {
+		kubeVersion.Major = "1"
+	}
+	if len(kubeVersion.Minor) == 0 {
+		kubeVersion.Minor = "22"
+	}
 	genericConfig.Version = &kubeVersion
 	genericConfig.Authorization.Authorizer = authorizerfactory.NewAlwaysAllowAuthorizer()
 

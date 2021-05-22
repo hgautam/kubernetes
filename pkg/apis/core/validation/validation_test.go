@@ -16719,13 +16719,6 @@ func TestPodIPsValidation(t *testing.T) {
 				oldPod.Name = newPod.Name
 
 				errs := ValidatePodStatusUpdate(newPod, oldPod, PodValidationOptions{})
-				if oldTestCase.expectError {
-					// The old pod was invalid, tolerate invalid IPs in the new pod as well
-					if len(errs) > 0 {
-						t.Fatalf("expected success for update to pod with already-invalid IPs, got errors: %v", errs)
-					}
-					continue
-				}
 
 				if len(errs) == 0 && testCase.expectError {
 					t.Fatalf("expected failure for %s, but there were none", testCase.pod.Name)
@@ -17379,9 +17372,9 @@ func TestValidateNonSpecialIP(t *testing.T) {
 		{"ipv6", "2000::1"},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
-			errs := validateNonSpecialIP(tc.ip, fp)
+			errs := ValidateNonSpecialIP(tc.ip, fp)
 			if len(errs) != 0 {
-				t.Errorf("validateNonSpecialIP(%q, ...) = %v; want nil", tc.ip, errs)
+				t.Errorf("ValidateNonSpecialIP(%q, ...) = %v; want nil", tc.ip, errs)
 			}
 		})
 	}
@@ -17399,9 +17392,399 @@ func TestValidateNonSpecialIP(t *testing.T) {
 		{"ipv6 local multicast", "ff02::"},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
-			errs := validateNonSpecialIP(tc.ip, fp)
+			errs := ValidateNonSpecialIP(tc.ip, fp)
 			if len(errs) == 0 {
-				t.Errorf("validateNonSpecialIP(%q, ...) = nil; want non-nil (errors)", tc.ip)
+				t.Errorf("ValidateNonSpecialIP(%q, ...) = nil; want non-nil (errors)", tc.ip)
+			}
+		})
+	}
+}
+
+func TestValidateWindowsHostProcessPod(t *testing.T) {
+	const containerName = "container"
+	falseVar := false
+	trueVar := true
+
+	testCases := []struct {
+		name            string
+		expectError     bool
+		featureEnabled  bool
+		allowPrivileged bool
+		podSpec         *core.PodSpec
+	}{
+		{
+			name:            "Spec with feature disabled and pod-wide HostProcess=false and should not validate",
+			expectError:     true,
+			featureEnabled:  false,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &falseVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature disabled and pod-wide HostProcess=nil set should valildate",
+			expectError:     false,
+			featureEnabled:  false,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: nil,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature disabled and container setting HostProcess=true should not valildate",
+			expectError:     true,
+			featureEnabled:  false,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature disabled and init container setting HostProcess=true should not valildate",
+			expectError:     true,
+			featureEnabled:  false,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				InitContainers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=true, and HostNetwork unset should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=ture, and HostNetwork set should validate",
+			expectError:     false,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=ture, HostNetwork set, and containers setting HostProcess=true should validate",
+			expectError:     false,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=nil, HostNetwork set, and all containers setting HostProcess=true should validate",
+			expectError:     false,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Pods with feature enabled, some containers setting HostProcess=true, and others setting HostProcess=false should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &falseVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, some containers setting HostProcess=true, and other leaving HostProcess unset should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=true, some containers setting HostProcess=true, and init containers setting HostProcess=false should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &falseVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=true, some containers setting HostProcess=true, and others setting HostProcess=false should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{
+					{
+						Name: containerName,
+						SecurityContext: &core.SecurityContext{
+							WindowsOptions: &core.WindowsSecurityContextOptions{
+								HostProcess: &trueVar,
+							},
+						},
+					}, {
+						Name: containerName,
+						SecurityContext: &core.SecurityContext{
+							WindowsOptions: &core.WindowsSecurityContextOptions{
+								HostProcess: &falseVar,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=true, some containers setting HostProcess=true, and others leaving HostProcess=nil should validate",
+			expectError:     false,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Spec with feature enabled, pod-wide HostProcess=false, some contaienrs setting HostProccess=true should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &falseVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+				InitContainers: []core.Container{{
+					Name: containerName,
+				}},
+			},
+		},
+		{
+			name:            "Pod's HostProcess set to true but all containers override to false should not validate",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: true,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+					WindowsOptions: &core.WindowsSecurityContextOptions{
+						HostProcess: &trueVar,
+					},
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &falseVar,
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:            "Valid HostProcess pod should spec should not validate if allowPrivileged is not set",
+			expectError:     true,
+			featureEnabled:  true,
+			allowPrivileged: false,
+			podSpec: &core.PodSpec{
+				SecurityContext: &core.PodSecurityContext{
+					HostNetwork: true,
+				},
+				Containers: []core.Container{{
+					Name: containerName,
+					SecurityContext: &core.SecurityContext{
+						WindowsOptions: &core.WindowsSecurityContextOptions{
+							HostProcess: &trueVar,
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.WindowsHostProcessContainers, testCase.featureEnabled)()
+
+			opts := PodValidationOptions{AllowWindowsHostProcessField: testCase.featureEnabled}
+
+			capabilities.SetForTests(capabilities.Capabilities{
+				AllowPrivileged: testCase.allowPrivileged,
+			})
+
+			errs := validateWindowsHostProcessPod(testCase.podSpec, field.NewPath("spec"), opts)
+			if testCase.expectError && len(errs) == 0 {
+				t.Errorf("Unexpected success")
+			}
+			if !testCase.expectError && len(errs) != 0 {
+				t.Errorf("Unexpected error(s): %v", errs)
 			}
 		})
 	}

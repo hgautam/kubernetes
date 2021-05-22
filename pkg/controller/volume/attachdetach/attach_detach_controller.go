@@ -57,6 +57,7 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	proxyutil "k8s.io/kubernetes/pkg/proxy/util"
 	"k8s.io/kubernetes/pkg/volume"
+	"k8s.io/kubernetes/pkg/volume/csi"
 	"k8s.io/kubernetes/pkg/volume/csimigration"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/operationexecutor"
@@ -149,7 +150,7 @@ func NewAttachDetachController(
 	adc.volumeAttachmentSynced = volumeAttachmentInformer.Informer().HasSynced
 
 	if err := adc.volumePluginMgr.InitPlugins(plugins, prober, adc); err != nil {
-		return nil, fmt.Errorf("Could not initialize volume plugins for Attach/Detach Controller: %+v", err)
+		return nil, fmt.Errorf("could not initialize volume plugins for Attach/Detach Controller: %w", err)
 	}
 
 	eventBroadcaster := record.NewBroadcaster()
@@ -206,7 +207,7 @@ func NewAttachDetachController(
 	// This custom indexer will index pods by its PVC keys. Then we don't need
 	// to iterate all pods every time to find pods which reference given PVC.
 	if err := common.AddPodPVCIndexerIfNotPresent(adc.podIndexer); err != nil {
-		return nil, fmt.Errorf("Could not initialize attach detach controller: %v", err)
+		return nil, fmt.Errorf("could not initialize attach detach controller: %w", err)
 	}
 
 	nodeInformer.Informer().AddEventHandler(kcache.ResourceEventHandlerFuncs{
@@ -724,6 +725,22 @@ func (adc *attachDetachController) processVolumeAttachments() error {
 				nodeName,
 				err)
 			continue
+		}
+		pluginName := plugin.GetPluginName()
+		if adc.csiMigratedPluginManager.IsMigrationEnabledForPlugin(pluginName) {
+			plugin, _ = adc.volumePluginMgr.FindAttachablePluginByName(csi.CSIPluginName)
+			// podNamespace is not needed here for Azurefile as the volumeName generated will be the same with or without podNamespace
+			volumeSpec, err = csimigration.TranslateInTreeSpecToCSI(volumeSpec, "" /* podNamespace */, adc.intreeToCSITranslator)
+			if err != nil {
+				klog.Errorf(
+					"Failed to translate intree volumeSpec to CSI volumeSpec for volume:%q, va.Name:%q, nodeName:%q: %v",
+					*pvName,
+					va.Name,
+					nodeName,
+					pluginName,
+					err)
+				continue
+			}
 		}
 		volumeName, err := volumeutil.GetUniqueVolumeNameFromSpec(plugin, volumeSpec)
 		if err != nil {

@@ -116,11 +116,6 @@ type ClusterConfiguration struct {
 	// +k8s:conversion-gen=false
 	CIImageRepository string
 
-	// UseHyperKubeImage controls if hyperkube should be used for Kubernetes components instead of their respective separate images
-	// DEPRECATED: As hyperkube is itself deprecated, this fields is too. It will be removed in future kubeadm config versions, kubeadm
-	// will print multiple warnings when set to true, and at some point it may become ignored.
-	UseHyperKubeImage bool
-
 	// FeatureGates enabled by the user.
 	FeatureGates map[string]bool
 
@@ -151,16 +146,19 @@ type APIServer struct {
 }
 
 // DNSAddOnType defines string identifying DNS add-on types
+// TODO: Remove with v1beta2 https://github.com/kubernetes/kubeadm/issues/2459
 type DNSAddOnType string
 
 const (
 	// CoreDNS add-on type
+	// TODO: Remove with v1beta2 https://github.com/kubernetes/kubeadm/issues/2459
 	CoreDNS DNSAddOnType = "CoreDNS"
 )
 
 // DNS defines the DNS addon that should be used in the cluster
 type DNS struct {
 	// Type defines the DNS add-on to be used
+	// TODO: Used only in validation over the internal type. Remove with v1beta2 https://github.com/kubernetes/kubeadm/issues/2459
 	Type DNSAddOnType
 
 	// ImageMeta allows to customize the image used for the DNS component
@@ -179,18 +177,6 @@ type ImageMeta struct {
 	ImageTag string
 
 	//TODO: evaluate if we need also a ImageName based on user feedbacks
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// ClusterStatus contains the cluster status. The ClusterStatus will be stored in the kubeadm-config
-// ConfigMap in the cluster, and then updated by kubeadm when additional control plane instance joins or leaves the cluster.
-type ClusterStatus struct {
-	metav1.TypeMeta
-
-	// APIEndpoints currently available in the cluster, one for each control plane/api server instance.
-	// The key of the map is the IP of the host's default interface
-	APIEndpoints map[string]APIEndpoint
 }
 
 // APIEndpoint struct contains elements of API server instance deployed on a node.

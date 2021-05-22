@@ -51,14 +51,6 @@ func TestGetKubernetesImage(t *testing.T) {
 		cfg      *kubeadmapi.ClusterConfiguration
 	}{
 		{
-			expected: GetGenericImage(gcrPrefix, constants.HyperKube, expected),
-			cfg: &kubeadmapi.ClusterConfiguration{
-				ImageRepository:   gcrPrefix,
-				KubernetesVersion: testversion,
-				UseHyperKubeImage: true,
-			},
-		},
-		{
 			image:    constants.KubeAPIServer,
 			expected: GetGenericImage(gcrPrefix, "kube-apiserver", expected),
 			cfg: &kubeadmapi.ClusterConfiguration{
@@ -216,12 +208,8 @@ func TestGetAllImages(t *testing.T) {
 			expect: constants.Etcd,
 		},
 		{
-			name: "CoreDNS image is returned",
-			cfg: &kubeadmapi.ClusterConfiguration{
-				DNS: kubeadmapi.DNS{
-					Type: kubeadmapi.CoreDNS,
-				},
-			},
+			name:   "CoreDNS image is returned",
+			cfg:    &kubeadmapi.ClusterConfiguration{},
 			expect: constants.CoreDNSImageName,
 		},
 	}

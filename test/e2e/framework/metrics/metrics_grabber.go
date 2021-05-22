@@ -27,20 +27,17 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-
 	"k8s.io/klog/v2"
+
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
 const (
-	// insecureSchedulerPort is the default port for the scheduler status server.
-	// May be overridden by a flag at startup.
-	// Deprecated: use the secure KubeSchedulerPort instead.
-	insecureSchedulerPort = 10251
-	// insecureKubeControllerManagerPort is the default port for the controller manager status server.
-	// May be overridden by a flag at startup.
-	// Deprecated: use the secure KubeControllerManagerPort instead.
-	insecureKubeControllerManagerPort = 10252
+	// kubeSchedulerPort is the default port for the scheduler status server.
+	kubeSchedulerPort = 10259
+	// kubeControllerManagerPort is the default port for the controller manager status server.
+	kubeControllerManagerPort = 10257
+	metricsProxyPod           = "metrics-proxy"
 )
 
 // Collection is metrics collection of components
@@ -62,6 +59,7 @@ type Grabber struct {
 	grabFromScheduler                 bool
 	grabFromClusterAutoscaler         bool
 	kubeScheduler                     string
+	waitForSchedulerReadyOnce         sync.Once
 	kubeControllerManager             string
 	waitForControllerManagerReadyOnce sync.Once
 }
@@ -152,7 +150,19 @@ func (g *Grabber) GrabFromScheduler() (SchedulerMetrics, error) {
 	if g.kubeScheduler == "" {
 		return SchedulerMetrics{}, fmt.Errorf("kube-scheduler pod is not registered. Skipping Scheduler's metrics gathering")
 	}
-	output, err := g.getMetricsFromPod(g.client, g.kubeScheduler, metav1.NamespaceSystem, insecureSchedulerPort)
+
+	var err error
+	var output string
+	g.waitForSchedulerReadyOnce.Do(func() {
+		var lastMetricsFetchErr error
+		if metricsWaitErr := wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
+			output, lastMetricsFetchErr = g.getMetricsFromPod(g.client, metricsProxyPod, metav1.NamespaceSystem, kubeSchedulerPort)
+			return lastMetricsFetchErr == nil, nil
+		}); metricsWaitErr != nil {
+			err = fmt.Errorf("error waiting for scheduler pod to expose metrics: %v; %v", metricsWaitErr, lastMetricsFetchErr)
+			return
+		}
+	})
 	if err != nil {
 		return SchedulerMetrics{}, err
 	}
@@ -187,6 +197,7 @@ func (g *Grabber) GrabFromControllerManager() (ControllerManagerMetrics, error) 
 	}
 
 	var err error
+	var output string
 	podName := g.kubeControllerManager
 	g.waitForControllerManagerReadyOnce.Do(func() {
 		if readyErr := e2epod.WaitForPodsReady(g.client, metav1.NamespaceSystem, podName, 0); readyErr != nil {
@@ -196,18 +207,13 @@ func (g *Grabber) GrabFromControllerManager() (ControllerManagerMetrics, error) 
 
 		var lastMetricsFetchErr error
 		if metricsWaitErr := wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
-			_, lastMetricsFetchErr = g.getMetricsFromPod(g.client, podName, metav1.NamespaceSystem, insecureKubeControllerManagerPort)
+			output, lastMetricsFetchErr = g.getMetricsFromPod(g.client, metricsProxyPod, metav1.NamespaceSystem, kubeControllerManagerPort)
 			return lastMetricsFetchErr == nil, nil
 		}); metricsWaitErr != nil {
 			err = fmt.Errorf("error waiting for controller manager pod to expose metrics: %v; %v", metricsWaitErr, lastMetricsFetchErr)
 			return
 		}
 	})
-	if err != nil {
-		return ControllerManagerMetrics{}, err
-	}
-
-	output, err := g.getMetricsFromPod(g.client, podName, metav1.NamespaceSystem, insecureKubeControllerManagerPort)
 	if err != nil {
 		return ControllerManagerMetrics{}, err
 	}
@@ -286,7 +292,7 @@ func (g *Grabber) getMetricsFromPod(client clientset.Interface, podName string, 
 		Namespace(namespace).
 		Resource("pods").
 		SubResource("proxy").
-		Name(fmt.Sprintf("%v:%v", podName, port)).
+		Name(fmt.Sprintf("%s:%d", podName, port)).
 		Suffix("metrics").
 		Do(context.TODO()).Raw()
 	if err != nil {
